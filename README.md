@@ -1,6 +1,6 @@
 # Xander
 
-Proof of Concept Elixir implementation of Cardano's Ouroboros networking mini-protocols.
+Elixir client for Cardano's Ouroboros networking.
 
 ## Running
 
@@ -9,10 +9,8 @@ Proof of Concept Elixir implementation of Cardano's Ouroboros networking mini-pr
 Run the following command using your own Cardano node's socket path:
 
 ```bash
-CARDANO_NODE_SOCKET_PATH=/your/cardano/node.socket mix query_current_era
+CARDANO_NODE_PATH=/your/cardano/node.socket mix query_current_era
 ```
-
-🚨 The N2C protocol on the Haskell cardano-node only works via Unix socket. It does not allow connection through an IP or hostname.
 
 ##### Setting up Unix socket mapping
 
@@ -34,11 +32,13 @@ socat UNIX-LISTEN:/tmp/cardano_node.socket,reuseaddr,fork TCP:localhost:3002
 ssh -N -L 3002:localhost:3002 user@remote-server-ip
 ```
 
-#### Via TLS to a URL 
+#### Using Demeter.run
 
-To connect to a node at a URL like demeter.run, set the `CARDANO_NODE_URL` to the URL of the node.
-Make sure the `CARDANO_NODE_SOCKET_PATH` is not set, or it will override the URL configuration.
+To connect to a node at Demeter.run, set `CARDANO_NODE_TYPE=ssl` and `CARDANO_NODE_PATH` to your Node Demeter URL.
 
+```bash
+CARDANO_NODE_TYPE=ssl CARDANO_NODE_PATH=https://your-node-at.demeter.run mix query_current_era
+```
 
 ## Catalyst Proposal
 
