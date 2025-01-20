@@ -1,0 +1,8 @@
+services:
+  xander:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # socat mapped socket files do not properly map to container when running in OS X
+    volumes:
+      - ${CARDANO_NODE_PATH:-/tmp/cardano-node.socket}:/tmp/cardano-node.socket
