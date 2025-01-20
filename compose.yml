@@ -6,7 +6,7 @@ services:
     environment:
       - CARDANO_NETWORK=mainnet
       # Enter your Demeter.run URL here
-      - CARDANO_NODE_PATH=""
+      - CARDANO_NODE_PATH=https://....cnode-m1.demeter.run
       - CARDANO_NODE_PORT=9443
       - CARDANO_NODE_TYPE=ssl
     # socat mapped socket files do not properly map to container when running in OS X
