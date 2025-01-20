@@ -1,10 +1,10 @@
 defmodule Mix.Tasks.Dev do
   use Mix.Task
 
-  alias Rex.Handshake
+  alias Xander.Handshake
 
   def run(_) do
-    Application.ensure_all_started(:rex)
+    Application.ensure_all_started(:xander)
 
     msg = Handshake.Proposal.version_message([10, 11, 12, 13, 14, 15, 16], :mainnet)
 

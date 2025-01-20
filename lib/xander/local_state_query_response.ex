@@ -1,4 +1,4 @@
-defmodule Rex.LocalStateQueryResponse do
+defmodule Xander.LocalStateQueryResponse do
   def parse_response(full_response) do
     <<_header_todo_investigate::binary-size(8), response_payload::binary>> = full_response
 

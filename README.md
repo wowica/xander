@@ -1,4 +1,4 @@
-# Rex
+# Xander
 
 Proof of Concept Elixir implementation of Cardano's Ouroboros networking mini-protocols.
 

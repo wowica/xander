@@ -1,3 +1,3 @@
-Application.stop(:rex)
+Application.stop(:xander)
 
 ExUnit.start()

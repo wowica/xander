@@ -1,4 +1,5 @@
 %{
   "cbor": {:hex, :cbor, "1.0.1", "39511158e8ea5a57c1fcb9639aaa7efde67129678fee49ebbda780f6f24959b0", [:mix], [], "hexpm", "5431acbe7a7908f17f6a9cd43311002836a34a8ab01876918d8cfb709cd8b6a2"},
+  "rename": {:hex, :rename, "0.1.0", "dc9727684c1000453b94aa7647abf6a715eb24c84a870a23751cf013f462655c", [:mix], [], "hexpm", "9ffc7c3363756c3ae0f60c082e95a1d6b8a352550be826f6220bc04b96e46fce"},
   "rename_project": {:hex, :rename_project, "0.1.0", "383ab9937e1eb381727b0cf5a45c295528e74987532ff1db2472bf9a00461a01", [:mix], [], "hexpm", "d65e3aa55628483cfcf5116572781cad5ac0c2300977b5ddfeff8183d9016e10"},
 }

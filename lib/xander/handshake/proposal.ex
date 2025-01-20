@@ -1,4 +1,4 @@
-defmodule Rex.Handshake.Proposal do
+defmodule Xander.Handshake.Proposal do
   @moduledoc """
   Builds handshake messages for node-to-client communication.
   """

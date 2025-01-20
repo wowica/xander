@@ -1,6 +1,6 @@
-defmodule Rex.Handshake.ProposalTest do
+defmodule Xander.Handshake.ProposalTest do
   use ExUnit.Case
-  alias Rex.Handshake
+  alias Xander.Handshake
 
   # <<45, 150, 74, 9>>
   @mainnet_magic 764_824_073

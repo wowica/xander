@@ -1,4 +1,4 @@
-defmodule Rex.Application do
+defmodule Xander.Application do
   @moduledoc false
 
   use Application
@@ -6,10 +6,10 @@ defmodule Rex.Application do
   @impl true
   def start(_type, _args) do
     children = [
-      {Rex.ClientStatem, client_opts()}
+      {Xander.ClientStatem, client_opts()}
     ]
 
-    opts = [strategy: :one_for_one, name: Rex.Supervisor]
+    opts = [strategy: :one_for_one, name: Xander.Supervisor]
     Supervisor.start_link(children, opts)
   end
 

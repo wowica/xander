@@ -1,7 +1,7 @@
-defmodule Rex.Handshake.Response do
+defmodule Xander.Handshake.Response do
   defstruct [:type, :version_number, :network_magic, :query]
 
-  alias Rex.Util
+  alias Xander.Util
 
   def validate(response) do
     %{payload: payload} = Util.plex(response)

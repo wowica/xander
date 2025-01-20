@@ -1,4 +1,4 @@
-defmodule Rex.HandshakeResponse do
+defmodule Xander.HandshakeResponse do
   defstruct [:type, :version_number, :network_magic, :query]
 
   def parse_response(full_response) do

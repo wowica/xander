@@ -1,4 +1,4 @@
-defmodule Rex.Util do
+defmodule Xander.Util do
   @doc """
   Unwrap the multiplexer header from the CDDL message.
   """

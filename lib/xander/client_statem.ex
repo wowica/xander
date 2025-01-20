@@ -1,12 +1,12 @@
-defmodule Rex.ClientStatem do
+defmodule Xander.ClientStatem do
   @moduledoc """
   Connects to a Cardano node via local UNIX socket using the Node-to-Client protocol
   """
   @behaviour :gen_statem
 
-  alias Rex.Handshake
-  alias Rex.LocalStateQueryResponse
-  alias Rex.Messages
+  alias Xander.Handshake
+  alias Xander.LocalStateQueryResponse
+  alias Xander.Messages
 
   require Logger
 

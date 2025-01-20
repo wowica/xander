@@ -1,4 +1,4 @@
-defmodule Rex.Messages do
+defmodule Xander.Messages do
   @moduledoc """
   This module returns protocol messages ready to be sent to the server.
   """
