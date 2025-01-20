@@ -16,7 +16,7 @@ defmodule Xander.Application do
   defp client_opts do
     network = System.get_env("CARDANO_NETWORK", "mainnet") |> String.to_atom()
     path = System.get_env("CARDANO_NODE_PATH", "/tmp/cardano-node.socket")
-    port = System.get_env("CARDANO_NODE_PORT", "0") |> String.to_integer()
+    port = System.get_env("CARDANO_NODE_PORT", "9443") |> String.to_integer()
     # socket, tcp or tls
     type = System.get_env("CARDANO_NODE_TYPE", "socket")
 
