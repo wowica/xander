@@ -63,7 +63,8 @@ ENV ELIXIR_ERL_OPTIONS="+fnu"
 
 # Create entrypoint script
 RUN echo '#!/bin/sh\n\
-/app/bin/xander eval "Application.ensure_all_started(:xander); Process.sleep(2_000); Xander.get_current_era() |> IO.inspect"' > /app/entrypoint.sh && \
+echo "Starting application..."\n\
+/app/bin/xander eval "Application.ensure_all_started(:xander); Xander.get_current_era() |> IO.inspect"' > /app/entrypoint.sh && \
 chmod +x /app/entrypoint.sh
 
 # Set the entrypoint
