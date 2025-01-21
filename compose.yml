@@ -3,12 +3,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    environment:
-      - CARDANO_NETWORK=mainnet
-      # Enter your Demeter.run URL here
-      - CARDANO_NODE_PATH=https://....cnode-m1.demeter.run
-      - CARDANO_NODE_PORT=9443
-      - CARDANO_NODE_TYPE=ssl
+    env_file:
+      - .env
     # socat mapped socket files do not properly map to container when running in OS X
     # volumes:
     #   - ${CARDANO_NODE_PATH:-/tmp/cardano-node.socket}:/tmp/cardano-node.socket
