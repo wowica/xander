@@ -5,7 +5,8 @@ services:
       dockerfile: Dockerfile
     env_file:
       - .env
-    # socat mapped socket files do not properly map to container when running in OS X
+    # Uncomment below to use Unix socket files.
+    # Note that socket files mapped via socat/ssh tunnels do not work when using containers on OS X.
     # volumes:
-    #   - ${CARDANO_NODE_PATH:-/tmp/cardano-node.socket}:/tmp/cardano-node.socket
+    #   - /your/path/to/cardano-node.socket:/tmp/cardano-node.socket
 

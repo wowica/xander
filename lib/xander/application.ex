@@ -15,16 +15,27 @@ defmodule Xander.Application do
 
   defp client_opts do
     network = System.get_env("CARDANO_NETWORK", "mainnet") |> String.to_atom()
-    path = System.get_env("CARDANO_NODE_PATH", "/tmp/cardano-node.socket")
-    port = System.get_env("CARDANO_NODE_PORT", "9443") |> String.to_integer()
-    # socket, tcp or tls
-    type = System.get_env("CARDANO_NODE_TYPE", "socket")
+    demeter_url = System.get_env("DEMETER_URL", "") |> String.trim()
 
-    [
-      network: network,
-      path: path,
-      port: port,
-      type: type
-    ]
+    if demeter_url == "" do
+      path = System.get_env("CARDANO_NODE_PATH", "/tmp/cardano-node.socket")
+
+      [
+        network: network,
+        path: path,
+        port: 0,
+        type: "socket"
+      ]
+    else
+      port = System.get_env("DEMETER_PORT", "9443") |> String.trim()
+      port = if port == "", do: 9443, else: String.to_integer(port)
+
+      [
+        network: network,
+        path: demeter_url,
+        port: port,
+        type: "ssl"
+      ]
+    end
   end
 end

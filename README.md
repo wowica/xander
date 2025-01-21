@@ -2,7 +2,41 @@
 
 Elixir client for Cardano's Ouroboros networking.
 
-## Running
+## Running via Docker
+
+### Using Demeter.run
+
+The demo application can connect to a Cardano node at [Demeter.run](https://demeter.run/) 🪄 
+
+First, create a Node on Demeter. Then, set your Node's url in the `DEMETER_URL` environment variable in the `.env` file. 
+
+For example:
+
+```bash
+DEMETER_URL=https://your-node-at.demeter.run
+```
+
+Then, run the application using Docker Compose:
+
+```bash
+docker compose up --build
+```
+
+#### Via local UNIX socket
+
+Uncomment the `volumes` section in the `compose.yml` file to mount the local UNIX socket to the container's socket path.
+
+```yml
+volumes:
+  - /path/to/node.socket:/tmp/cardano-node.socket
+```
+
+Then, run the application using Docker Compose:
+```bash
+docker compose up --build
+```
+
+## Running natively with an Elixir local dev environment
 
 #### Via local UNIX socket
 
@@ -13,6 +47,10 @@ CARDANO_NODE_PATH=/your/cardano/node.socket mix query_current_era
 ```
 
 ##### Setting up Unix socket mapping
+
+This is useful if you want to run the application on a server different from your Cardano node.
+
+🚨 **Note:** Socket files mapped via socat/ssh tunnels do not work when using containers on OS X.
 
 1. Run socat on the remote server with the following command:
 
@@ -34,13 +72,8 @@ ssh -N -L 3002:localhost:3002 user@remote-server-ip
 
 #### Using Demeter.run
 
-To connect to a node at Demeter.run, set `CARDANO_NODE_TYPE=ssl` and `CARDANO_NODE_PATH` to your Node Demeter URL.
+To connect to a node at Demeter.run, set `DEMETER_URL` to your Node Demeter URL.
 
 ```bash
-CARDANO_NODE_TYPE=ssl CARDANO_NODE_PATH=https://your-node-at.demeter.run mix query_current_era
+DEMETER_URL=https://your-node-at.demeter.run mix query_current_era
 ```
-
-## Catalyst Proposal
-
-F13 proposal for further development of this project:
-[https://cardano.ideascale.com/c/cardano/idea/131598](https://cardano.ideascale.com/c/cardano/idea/131598)
