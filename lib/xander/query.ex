@@ -151,10 +151,10 @@ defmodule Xander.Query do
     {:next_state, :disconnected, data}
   end
 
-  defp maybe_local_path(path, "socket"), do: {:local, path}
+  defp maybe_local_path(path, :socket), do: {:local, path}
   defp maybe_local_path(path, _), do: path
 
-  defp maybe_local_port(_port, "socket"), do: 0
+  defp maybe_local_port(_port, :socket), do: 0
   defp maybe_local_port(port, _), do: port
 
   defp maybe_parse_path(path) when is_binary(path) do
@@ -164,7 +164,7 @@ defmodule Xander.Query do
 
   defp maybe_parse_path(path), do: path
 
-  defp tcp_lib("ssl"), do: :ssl
+  defp tcp_lib(:ssl), do: :ssl
   defp tcp_lib(_), do: :gen_tcp
 
   defp tcp_opts(:ssl, path),

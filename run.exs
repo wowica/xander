@@ -6,7 +6,7 @@ Mix.install([
 
 socket_path = System.get_env("CARDANO_NODE_SOCKET_PATH")
 
-unless socket_path do
+if socket_path == nil do
   IO.puts("Error: CARDANO_NODE_SOCKET_PATH environment variable is not set")
   System.halt(1)
 end
@@ -15,9 +15,7 @@ alias Xander.Config
 alias Xander.Query
 
 # Default config connects via a local UNIX socket
-config = socket_path
-  |> Config.default_config()
-  |> Config.validate_config()
+config = Config.default_config!(socket_path)
 
 case Query.start_link(config) do
   {:ok, pid} ->

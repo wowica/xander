@@ -8,14 +8,12 @@ defmodule Xander.Config do
 
       # Use default configuration
       path = "/tmp/cardano-node.socket"
-      config = Xander.Config.default_config(path)
+      config = Xander.Config.default_config!(path)
       {:ok, pid} = Xander.Query.start_link(config)
 
       # Or customize the configuration
       path = "/tmp/cardano-node.socket"
-      config = path
-        |> Xander.Config.default_config(:preview)
-        |> Xander.Config.validate_config()
+      config = Xander.Config.default_config!(path, :preview)
 
       {:ok, pid} = Xander.Query.start_link(config)
 
@@ -23,9 +21,7 @@ defmodule Xander.Config do
 
       # Configure for Demeter
       url = "https://your-demeter-url.demeter.run"
-      config = url
-        |> Xander.Config.demeter_config()
-        |> Xander.Config.validate_config()
+      config = Xander.Config.demeter_config!(url)
 
       {:ok, pid} = Xander.Query.start_link(config)
 
@@ -36,19 +32,20 @@ defmodule Xander.Config do
   @doc """
   Returns the default configuration for connecting to a Cardano node.
   """
-  def default_config(path, network \\ :mainnet) do
+  def default_config!(path, network \\ :mainnet) do
     [
       network: network,
       path: path,
       port: 0,
-      type: "socket"
+      type: :socket
     ]
+    |> validate_config!()
   end
 
   @doc """
   Returns configuration for connecting to a Demeter node.
   """
-  def demeter_config(url, opts \\ []) do
+  def demeter_config!(url, opts \\ []) do
     port = Keyword.get(opts, :port, 9443)
     network = Keyword.get(opts, :network, :mainnet)
 
@@ -56,20 +53,19 @@ defmodule Xander.Config do
       network: network,
       path: url,
       port: port,
-      type: "ssl"
+      type: :ssl
     ]
+    |> validate_config!()
   end
 
-  @doc """
-  Validates and normalizes the configuration options.
-  """
-  def validate_config(opts) do
+  # Validates and normalizes the configuration options.
+  defp validate_config!(opts) do
     if opts[:network] not in [:mainnet, :preprod, :preview, :sanchonet] do
       raise ArgumentError, "network must be :mainnet, :preprod, :preview, or :sanchonet"
     end
 
-    if opts[:type] not in ["socket", "ssl"] do
-      raise ArgumentError, "type must be \"socket\" or \"ssl\""
+    if opts[:type] not in [:socket, :ssl] do
+      raise ArgumentError, "type must be :socket or :ssl"
     end
 
     opts
