@@ -2,6 +2,13 @@
 
 Elixir client for Cardano's Ouroboros networking.
 
+⚠️ This project is under active development. For a more stable solution to connect to a Cardano node using Elixir, see [Xogmios](https://github.com/wowica/xogmios).
+
+ There are two ways to run this project:
+
+1. [Running via Docker](#running-via-docker)
+2. [Running natively with an Elixir local dev environment](#running-natively-with-an-elixir-local-dev-environment)
+
 ## Running via Docker
 
 ### Using Demeter.run
