@@ -50,7 +50,7 @@ docker compose up --build
 Run the following command using your own Cardano node's socket path:
 
 ```bash
-CARDANO_NODE_PATH=/your/cardano/node.socket mix query_current_era
+CARDANO_NODE_PATH=/your/cardano/node.socket elixir run.exs
 ```
 
 ##### Setting up Unix socket mapping
