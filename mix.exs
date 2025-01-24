@@ -8,7 +8,7 @@ defmodule Xander.MixProject do
       elixir: "~> 1.16",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
-      default_task: "query"
+      default_task: "query_current_era"
     ]
   end
 

@@ -157,7 +157,11 @@ defmodule Xander.ClientStatem do
   defp maybe_local_port(_port, "socket"), do: 0
   defp maybe_local_port(port, _), do: port
 
-  defp maybe_parse_path(path) when is_binary(path), do: ~c[#{path}]
+  defp maybe_parse_path(path) when is_binary(path) do
+    uri = URI.parse(path)
+    ~c"#{uri.host}"
+  end
+
   defp maybe_parse_path(path), do: path
 
   defp tcp_lib("ssl"), do: :ssl

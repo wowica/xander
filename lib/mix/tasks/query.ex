@@ -5,6 +5,6 @@ defmodule Mix.Tasks.QueryCurrentEra do
 
   def run(_) do
     Application.ensure_all_started(:xander)
-    Xander.get_current_era()
+    Xander.get_current_era() |> IO.inspect()
   end
 end
