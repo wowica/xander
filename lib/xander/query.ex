@@ -1,6 +1,6 @@
 defmodule Xander.Query do
   @moduledoc """
-  Connects to a Cardano node using the Node-to-Client (n2c) protocol
+  Issues ledger queries to a Cardano node using the Node-to-Client (n2c) protocol.
   """
   @behaviour :gen_statem
 
