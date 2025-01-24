@@ -1,6 +1,6 @@
-defmodule Xander.ClientStatem do
+defmodule Xander.Query do
   @moduledoc """
-  Connects to a Cardano node via local UNIX socket using the Node-to-Client protocol
+  Connects to a Cardano node using the Node-to-Client (n2c) protocol
   """
   @behaviour :gen_statem
 
@@ -19,7 +19,7 @@ defmodule Xander.ClientStatem do
   # Public API #
   ##############
 
-  def query(pid \\ __MODULE__, query_name) do
+  def run(pid \\ __MODULE__, query_name) do
     :gen_statem.call(pid, {:request, query_name})
   end
 
