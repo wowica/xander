@@ -1,6 +1,6 @@
-defmodule Xander.ClientStatem do
+defmodule Xander.Query do
   @moduledoc """
-  Connects to a Cardano node via local UNIX socket using the Node-to-Client protocol
+  Issues ledger queries to a Cardano node using the Node-to-Client (n2c) protocol.
   """
   @behaviour :gen_statem
 
@@ -19,7 +19,7 @@ defmodule Xander.ClientStatem do
   # Public API #
   ##############
 
-  def query(pid \\ __MODULE__, query_name) do
+  def run(pid \\ __MODULE__, query_name) do
     :gen_statem.call(pid, {:request, query_name})
   end
 
@@ -151,10 +151,10 @@ defmodule Xander.ClientStatem do
     {:next_state, :disconnected, data}
   end
 
-  defp maybe_local_path(path, "socket"), do: {:local, path}
+  defp maybe_local_path(path, :socket), do: {:local, path}
   defp maybe_local_path(path, _), do: path
 
-  defp maybe_local_port(_port, "socket"), do: 0
+  defp maybe_local_port(_port, :socket), do: 0
   defp maybe_local_port(port, _), do: port
 
   defp maybe_parse_path(path) when is_binary(path) do
@@ -164,7 +164,7 @@ defmodule Xander.ClientStatem do
 
   defp maybe_parse_path(path), do: path
 
-  defp tcp_lib("ssl"), do: :ssl
+  defp tcp_lib(:ssl), do: :ssl
   defp tcp_lib(_), do: :gen_tcp
 
   defp tcp_opts(:ssl, path),
