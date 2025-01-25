@@ -3,42 +3,15 @@ defmodule Xander.Messages do
   This module returns protocol messages ready to be sent to the server.
   """
 
-  # def handshake(network) do
-  #   case network do
-  #     :mainnet ->
-  #       payload =
-  #         <<130, 0, 167, 25, 128, 10, 26, 45, 150, 74, 9, 25, 128, 11, 26, 45, 150, 74, 9, 25,
-  #           128, 12, 26, 45, 150, 74, 9, 25, 128, 13, 26, 45, 150, 74, 9, 25, 128, 14, 26, 45,
-  #           150, 74, 9, 25, 128, 15, 130, 26, 45, 150, 74, 9, 244, 25, 128, 16, 130, 26, 45, 150,
-  #           74, 9, 244>>
+  @mini_protocols %{
+    handshake: 0,
+    chain_sync: 5,
+    local_tx_submission: 6,
+    local_state_query: 7,
+    local_tx_monitor: 9
+  }
 
-  #       # payload =
-  #       # <<130, 0, 161, 25, 128, 16, 130, 26, 45, 150, 74, 9, 244>>
-
-  #       # payload =
-  #       #  <<130, 0, 161, 25, 128, 12, 26, 45, 150, 74, 9>>
-
-  #       # N2N v13
-  #       # payload = <<130, 0, 161, 13, 132, 26, 45, 150, 74, 9, 244, 0, 244>>
-
-  #       payload_size_bytes = <<byte_size(payload)::unsigned-16>>
-  #       # Todo: protocol + timestamp
-  #       header = [<<0, 0, 1, 52, 0, 0>> | [payload_size_bytes]]
-
-  #       [header | [payload]]
-
-  #     :sanchonet ->
-  #       header = [<<0, 0, 0, 110, 0, 0, 0, 35>>]
-
-  #       payload =
-  #         [
-  #           <<130, 0, 167, 25, 128, 10, 4, 25, 128, 11, 4, 25, 128, 12, 4, 25, 128, 13, 4, 25,
-  #             128, 14, 4, 25, 128, 15, 130, 4, 244, 25, 128, 16, 130, 4, 244>>
-  #         ]
-
-  #       [header | payload]
-  #   end
-  # end
+  @get_current_era [0, [2, [1]]]
 
   def msg_acquire do
     header = [<<0, 0, 44, 137, 0, 7, 0, 2>>]
@@ -54,10 +27,35 @@ defmodule Xander.Messages do
     [header | payload]
   end
 
-  def get_current_era do
-    header = [<<0, 0, 78, 154, 0, 7, 0, 8>>]
-    payload = [<<130, 3, 130, 0, 130, 2, 129, 1>>]
+  @doc """
+  Builds a static query to get the current era.
 
-    [header | payload]
+  Payload CBOR: [3, [0, [2, [1]]]]
+  Payload Bitstring: <<130, 3, 130, 0, 130, 2, 129, 1>>
+
+  ## Examples
+
+    iex> <<_timestamp::32, msg::binary>> = Xander.Messages.get_current_era()
+    iex> msg
+    <<0, 7, 0, 8, 130, 3, 130, 0, 130, 2, 129, 1>>
+  """
+  def get_current_era do
+    payload = build_query(@get_current_era)
+    bitstring_payload = CBOR.encode(payload)
+
+    header(@mini_protocols.local_state_query, bitstring_payload) <> bitstring_payload
   end
+
+  defp build_query(query), do: [3, query]
+
+  # middle 16 bits are: 1 bit == 0 for initiator and 15 bits for the mini protocol ID
+  defp header(mini_protocol_id, payload),
+    do:
+      <<header_timestamp()::32>> <> <<0, mini_protocol_id>> <> <<byte_size(payload)::unsigned-16>>
+
+  # Returns the lower 32 bits of the system's monotonic time in microseconds
+  defp header_timestamp,
+    do:
+      System.monotonic_time(:microsecond)
+      |> Bitwise.band(0xFFFFFFFF)
 end
