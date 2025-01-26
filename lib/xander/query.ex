@@ -125,11 +125,18 @@ defmodule Xander.Query do
 
   def established_has_agency(
         {:call, from},
-        {:request, :get_current_era},
+        {:request, request},
         %__MODULE__{client: client, socket: socket} = data
       ) do
     :ok = setopts_lib(client).setopts(socket, active: :once)
-    :ok = client.send(socket, Messages.get_current_era())
+
+    message =
+      case request do
+        :get_current_era -> Messages.get_current_era()
+        :get_current_block_height -> Messages.get_current_block_height()
+      end
+
+    :ok = client.send(socket, message)
     data = update_in(data.queue, &:queue.in(from, &1))
     {:keep_state, data}
   end

@@ -11,6 +11,7 @@ defmodule Xander.Messages do
     local_tx_monitor: 9
   }
 
+  @get_current_block_height [2]
   @get_current_era [0, [2, [1]]]
 
   def msg_acquire do
@@ -39,8 +40,29 @@ defmodule Xander.Messages do
     iex> msg
     <<0, 7, 0, 8, 130, 3, 130, 0, 130, 2, 129, 1>>
   """
+  @spec get_current_era() :: binary()
   def get_current_era do
     payload = build_query(@get_current_era)
+    bitstring_payload = CBOR.encode(payload)
+
+    header(@mini_protocols.local_state_query, bitstring_payload) <> bitstring_payload
+  end
+
+  @doc """
+  Builds a static query to get the current block height.
+
+  Payload CBOR: [3, [2]]
+  Payload Bitstring: <<130, 3, 129, 2>>
+
+  ## Examples
+
+    iex> <<_timestamp::32, msg::binary>> = Xander.Messages.get_current_block_height()
+    iex> msg
+    <<0, 7, 0, 4, 130, 3, 129, 2>>
+  """
+  @spec get_current_block_height() :: binary()
+  def get_current_block_height do
+    payload = build_query(@get_current_block_height)
     bitstring_payload = CBOR.encode(payload)
 
     header(@mini_protocols.local_state_query, bitstring_payload) <> bitstring_payload
