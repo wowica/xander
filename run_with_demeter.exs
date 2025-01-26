@@ -15,23 +15,33 @@ end
 alias Xander.Config
 alias Xander.Query
 
+network = System.get_env("CARDANO_NETWORK", "mainnet") |> String.to_atom()
+
 # Configure Xander client for Demeter
-config = Config.demeter_config!(demeter_url)
+config = Config.demeter_config!(demeter_url, network: network)
+
+queries = [
+  :get_epoch_number,
+  :get_current_era
+]
 
 case Query.start_link(config) do
   {:ok, pid} ->
-    IO.puts("Successfully connected to Demeter node")
+    IO.puts("Successfully connected to Cardano node")
 
-    case Query.run(pid, :get_current_era) do
-      {:ok, current_era} ->
-        IO.puts("Current Cardano era: #{inspect(current_era)}")
+    for query <- queries do
+      case Query.run(pid, query) do
+      {:ok, result} ->
+        IO.puts("Query #{query} result: #{inspect(result)}")
 
       {:error, reason} ->
-        IO.puts("Error querying current era: #{inspect(reason)}")
-        System.halt(1)
+          IO.puts("Error querying epoch number: #{inspect(reason)}")
+          System.halt(1)
+      end
     end
 
+
   {:error, reason} ->
-    IO.puts("Failed to connect to Demeter node: #{inspect(reason)}")
+    IO.puts("Failed to connect to Cardano node: #{inspect(reason)}")
     System.halt(1)
 end
