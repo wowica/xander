@@ -142,6 +142,17 @@ defmodule Xander.Query do
   end
 
   def established_has_agency(
+        {:call, from},
+        {:request, :get_epoch_number},
+        %__MODULE__{client: client, socket: socket} = data
+      ) do
+    :ok = setopts_lib(client).setopts(socket, active: :once)
+    :ok = client.send(socket, Messages.get_epoch_number())
+    data = update_in(data.queue, &:queue.in(from, &1))
+    {:keep_state, data}
+  end
+
+  def established_has_agency(
         :info,
         {_tcp_or_ssl, socket, bytes},
         %__MODULE__{socket: socket} = data

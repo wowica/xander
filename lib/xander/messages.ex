@@ -80,4 +80,10 @@ defmodule Xander.Messages do
     do:
       System.monotonic_time(:microsecond)
       |> Bitwise.band(0xFFFFFFFF)
+
+  def get_epoch_number do
+    header = [<<0, 0, 117, 154, 0, 7, 0, 10>>]
+    payload = [<<130, 3, 130, 0, 130, 0, 130, 6, 129, 1>>]
+    [header | payload]
+  end
 end
