@@ -1,6 +1,6 @@
 defmodule Xander.Messages do
   @moduledoc """
-  This module returns protocol messages ready to be sent to the server.
+  This module builds protocol messages ready to be sent to the server.
   """
 
   @mini_protocols %{
@@ -15,16 +15,22 @@ defmodule Xander.Messages do
   @get_current_era [0, [2, [1]]]
   @get_epoch_number [0, [0, [6, [1]]]]
 
+  # See the CDDL for details on mapping of messages to numbers.
+  # https://github.com/IntersectMBO/ouroboros-network/blob/main/ouroboros-network-protocols/cddl/specs/local-state-query.cddl
+  @message_query 3
+  @message_acquire 8
+  @message_release 5
+
   def msg_acquire do
     header = [<<0, 0, 44, 137, 0, 7, 0, 2>>]
-    payload = [<<129, 8>>]
+    payload = [<<129, @message_acquire>>]
 
     [header | payload]
   end
 
   def msg_release do
     header = [<<0, 0, 167, 211, 0, 7, 0, 2>>]
-    payload = [<<129, 5>>]
+    payload = [<<129, @message_release>>]
 
     [header | payload]
   end
@@ -88,7 +94,7 @@ defmodule Xander.Messages do
     header(@mini_protocols.local_state_query, bitstring_payload) <> bitstring_payload
   end
 
-  defp build_query(query), do: [3, query]
+  defp build_query(query), do: [@message_query, query]
 
   # middle 16 bits are: 1 bit == 0 for initiator and 15 bits for the mini protocol ID
   defp header(mini_protocol_id, payload),
