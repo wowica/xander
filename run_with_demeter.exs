@@ -28,7 +28,7 @@ queries = [
 
 case Query.start_link(config) do
   {:ok, pid} ->
-    IO.puts("Successfully connected to Cardano node")
+    IO.puts("Successfully connected to Demeter node")
 
     for query <- queries do
       case Query.run(pid, query) do
@@ -43,6 +43,6 @@ case Query.start_link(config) do
 
 
   {:error, reason} ->
-    IO.puts("Failed to connect to Cardano node: #{inspect(reason)}")
+    IO.puts("Failed to connect to Demeter node: #{inspect(reason)}")
     System.halt(1)
 end
