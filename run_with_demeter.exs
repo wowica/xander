@@ -41,7 +41,6 @@ case Query.start_link(config) do
       end
     end
 
-
   {:error, reason} ->
     IO.puts("Failed to connect to Demeter node: #{inspect(reason)}")
     System.halt(1)
