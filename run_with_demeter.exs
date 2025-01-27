@@ -36,7 +36,7 @@ case Query.start_link(config) do
         IO.puts("Query #{query} result: #{inspect(result)}")
 
       {:error, reason} ->
-          IO.puts("Error querying epoch number: #{inspect(reason)}")
+          IO.puts("Error querying #{inspect(query)}: #{inspect(reason)}")
           System.halt(1)
       end
     end
