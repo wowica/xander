@@ -72,7 +72,7 @@ defmodule Xander.Messages do
   @doc """
   Builds a static query to get the current epoch number.
 
-  Payload CBOR: [3, [0, [6, [1]]]]
+  Payload CBOR: [3, [0, [0, [6, [1]]]]]
   Payload Bitstring: <<130, 3, 130, 0, 130, 0, 130, 6, 129, 1>>
 
   ## Examples
