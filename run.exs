@@ -19,7 +19,8 @@ config = Config.default_config!(socket_path)
 
 queries = [
   :get_epoch_number,
-  :get_current_era
+  :get_current_era,
+  :get_current_block_height
 ]
 
 case Query.start_link(config) do
