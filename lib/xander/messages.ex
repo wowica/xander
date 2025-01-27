@@ -13,6 +13,7 @@ defmodule Xander.Messages do
 
   @get_current_block_height [2]
   @get_current_era [0, [2, [1]]]
+  @get_epoch_number [0, [0, [6, [1]]]]
 
   def msg_acquire do
     header = [<<0, 0, 44, 137, 0, 7, 0, 2>>]
@@ -68,6 +69,25 @@ defmodule Xander.Messages do
     header(@mini_protocols.local_state_query, bitstring_payload) <> bitstring_payload
   end
 
+  @doc """
+  Builds a static query to get the current epoch number.
+
+  Payload CBOR: [3, [0, [6, [1]]]]
+  Payload Bitstring: <<130, 3, 130, 0, 130, 0, 130, 6, 129, 1>>
+
+  ## Examples
+
+    iex> <<_timestamp::32, msg::binary>> = Xander.Messages.get_epoch_number()
+    iex> msg
+    <<0, 7, 0, 10, 130, 3, 130, 0, 130, 0, 130, 6, 129, 1>>
+  """
+  def get_epoch_number do
+    payload = build_query(@get_epoch_number)
+    bitstring_payload = CBOR.encode(payload)
+
+    header(@mini_protocols.local_state_query, bitstring_payload) <> bitstring_payload
+  end
+
   defp build_query(query), do: [3, query]
 
   # middle 16 bits are: 1 bit == 0 for initiator and 15 bits for the mini protocol ID
@@ -80,10 +100,4 @@ defmodule Xander.Messages do
     do:
       System.monotonic_time(:microsecond)
       |> Bitwise.band(0xFFFFFFFF)
-
-  def get_epoch_number do
-    header = [<<0, 0, 117, 154, 0, 7, 0, 10>>]
-    payload = [<<130, 3, 130, 0, 130, 0, 130, 6, 129, 1>>]
-    [header | payload]
-  end
 end
