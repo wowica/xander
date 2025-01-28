@@ -1,4 +1,4 @@
-defmodule Xander.LocalStateQueryResponse do
+defmodule Xander.Query.Response do
   # See the CDDL for details on mapping of messages to numbers.
   # https://github.com/IntersectMBO/ouroboros-network/blob/main/ouroboros-network-protocols/cddl/specs/local-state-query.cddl
   @message_response 4

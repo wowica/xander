@@ -5,8 +5,8 @@ defmodule Xander.Query do
   @behaviour :gen_statem
 
   alias Xander.Handshake
-  alias Xander.LocalStateQueryResponse
   alias Xander.Messages
+  alias Xander.Query.Response
 
   require Logger
 
@@ -147,7 +147,7 @@ defmodule Xander.Query do
         {_tcp_or_ssl, socket, bytes},
         %__MODULE__{socket: socket} = data
       ) do
-    {:ok, current_era} = LocalStateQueryResponse.parse_response(bytes)
+    {:ok, current_era} = Response.parse_response(bytes)
     {{:value, caller}, data} = get_and_update_in(data.queue, &:queue.out/1)
     # This action issues the response back to the clinet
     actions = [{:reply, caller, {:ok, current_era}}]
