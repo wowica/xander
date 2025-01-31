@@ -1,4 +1,8 @@
-defmodule Xander.LocalStateQueryResponse do
+defmodule Xander.Query.Response do
+  # See the CDDL for details on mapping of messages to numbers.
+  # https://github.com/IntersectMBO/ouroboros-network/blob/main/ouroboros-network-protocols/cddl/specs/local-state-query.cddl
+  @message_response 4
+
   def parse_response(full_response) do
     <<_header_todo_investigate::binary-size(8), response_payload::binary>> = full_response
 
@@ -8,7 +12,7 @@ defmodule Xander.LocalStateQueryResponse do
     end
   end
 
-  defp parse_cbor([4, response]) do
+  defp parse_cbor([@message_response, response]) do
     {:ok, response}
   end
 

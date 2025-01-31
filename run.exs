@@ -17,18 +17,27 @@ alias Xander.Query
 # Default config connects via a local UNIX socket
 config = Config.default_config!(socket_path)
 
+queries = [
+  :get_epoch_number,
+  :get_current_era,
+  :get_current_block_height
+]
+
 case Query.start_link(config) do
   {:ok, pid} ->
     IO.puts("Successfully connected to Cardano node")
 
-    case Query.run(pid, :get_current_era) do
-      {:ok, current_era} ->
-        IO.puts("Current Cardano era: #{inspect(current_era)}")
+    for query <- queries do
+      case Query.run(pid, query) do
+      {:ok, result} ->
+        IO.puts("Query #{query} result: #{inspect(result)}")
 
       {:error, reason} ->
-        IO.puts("Error querying current era: #{inspect(reason)}")
-        System.halt(1)
+          IO.puts("Error querying #{inspect(query)}: #{inspect(reason)}")
+          System.halt(1)
+      end
     end
+
 
   {:error, reason} ->
     IO.puts("Failed to connect to Cardano node: #{inspect(reason)}")
