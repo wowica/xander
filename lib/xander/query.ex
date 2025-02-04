@@ -147,10 +147,10 @@ defmodule Xander.Query do
         {_tcp_or_ssl, socket, bytes},
         %__MODULE__{socket: socket} = data
       ) do
-    {:ok, current_era} = Response.parse_response(bytes)
+    {:ok, query_response} = Response.parse_response(bytes)
     {{:value, caller}, data} = get_and_update_in(data.queue, &:queue.out/1)
-    # This action issues the response back to the clinet
-    actions = [{:reply, caller, {:ok, current_era}}]
+    # This action issues the response back to the client
+    actions = [{:reply, caller, {:ok, query_response}}]
     {:keep_state, data, actions}
   end
 
