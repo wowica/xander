@@ -18,8 +18,8 @@ defmodule Xander.Messages do
   # See the CDDL for details on mapping of messages to numbers.
   # https://github.com/IntersectMBO/ouroboros-network/blob/main/ouroboros-network-protocols/cddl/specs/local-state-query.cddl
   @message_query 3
-  @message_acquire 8
-  @message_release 5
+  @message_acquire [8]
+  @message_release [5]
 
   @doc """
   Acquires a snapshot of the mempool, allowing the protocol to make queries.
@@ -32,10 +32,8 @@ defmodule Xander.Messages do
 
   """
   def msg_acquire do
-    header = <<0, 0, 44, 137, 0, 7, 0, 2>>
-    payload = <<129, @message_acquire>>
-
-    header <> payload
+    payload = CBOR.encode(@message_acquire)
+    header(@mini_protocols.local_state_query, payload) <> payload
   end
 
   @doc """
@@ -50,10 +48,8 @@ defmodule Xander.Messages do
 
   """
   def msg_release do
-    header = <<0, 0, 167, 211, 0, 7, 0, 2>>
-    payload = <<129, @message_release>>
-
-    header <> payload
+    payload = CBOR.encode(@message_release)
+    header(@mini_protocols.local_state_query, payload) <> payload
   end
 
   @doc """
