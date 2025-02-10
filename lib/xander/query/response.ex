@@ -2,6 +2,7 @@ defmodule Xander.Query.Response do
   # See the CDDL for details on mapping of messages to numbers.
   # https://github.com/IntersectMBO/ouroboros-network/blob/main/ouroboros-network-protocols/cddl/specs/local-state-query.cddl
   @message_response 4
+  @slot_timeline 1
 
   def parse_response(full_response) do
     %{payload: response_payload} = Xander.Util.plex(full_response)
@@ -13,7 +14,7 @@ defmodule Xander.Query.Response do
   end
 
   # For get_current_block_height
-  defp parse_cbor([@message_response, [1, response]]) do
+  defp parse_cbor([@message_response, [@slot_timeline, response]]) do
     {:ok, response}
   end
 
