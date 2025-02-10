@@ -19,11 +19,17 @@ defmodule Xander.Query.Response do
     {:ok, {slot_number, block_hash}}
   end
 
-  # For get_current_block_height
-  defp parse_cbor([@message_response, [@slot_timeline, response]]) do
-    {:ok, response}
+  # This clause parses the response from the get_current_block_height query
+  defp parse_cbor([@message_response, [@slot_timeline, block_height]]) do
+    {:ok, block_height}
   end
 
+  # This clause parses the response from get_epoch_number
+  defp parse_cbor([@message_response, [epoch_number]]) do
+    {:ok, epoch_number}
+  end
+
+  # This clause parses the response from all other queries
   defp parse_cbor([@message_response, response]) do
     {:ok, response}
   end
