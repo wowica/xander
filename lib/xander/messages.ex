@@ -14,6 +14,7 @@ defmodule Xander.Messages do
   @get_current_block_height [2]
   @get_current_era [0, [2, [1]]]
   @get_epoch_number [0, [0, [6, [1]]]]
+  @get_current_tip [3]
 
   # See the CDDL for details on mapping of messages to numbers.
   # https://github.com/IntersectMBO/ouroboros-network/blob/main/ouroboros-network-protocols/cddl/specs/local-state-query.cddl
@@ -106,6 +107,27 @@ defmodule Xander.Messages do
   """
   def get_epoch_number do
     payload = build_query(@get_epoch_number)
+    bitstring_payload = CBOR.encode(payload)
+
+    header(@mini_protocols.local_state_query, bitstring_payload) <> bitstring_payload
+  end
+
+  @doc """
+  Builds a static query to get the current tip of the chain
+
+  Payload CBOR: [3]
+  Payload Bitstring: <<129, 3>>
+
+  ## Examples
+
+    iex> <<_timestamp::32, msg::binary>> = Xander.Messages.get_current_tip()
+    iex> msg
+    <<0, 7, 0, 4, 130, 3, 129, 3>>
+
+  """
+  @spec get_current_tip() :: binary()
+  def get_current_tip do
+    payload = build_query(@get_current_tip)
     bitstring_payload = CBOR.encode(payload)
 
     header(@mini_protocols.local_state_query, bitstring_payload) <> bitstring_payload

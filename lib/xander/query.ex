@@ -135,6 +135,7 @@ defmodule Xander.Query do
         :get_current_era -> Messages.get_current_era()
         :get_current_block_height -> Messages.get_current_block_height()
         :get_epoch_number -> Messages.get_epoch_number()
+        :get_current_tip -> Messages.get_current_tip()
       end
 
     :ok = client.send(socket, message)

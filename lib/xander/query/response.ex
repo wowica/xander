@@ -13,6 +13,12 @@ defmodule Xander.Query.Response do
     end
   end
 
+  # This clause parses the response from the get_current_tip query
+  defp parse_cbor([@message_response, [slot_number, %CBOR.Tag{tag: :bytes, value: response}]]) do
+    block_hash = Base.encode16(response, case: :lower)
+    {:ok, {slot_number, block_hash}}
+  end
+
   # For get_current_block_height
   defp parse_cbor([@message_response, [@slot_timeline, response]]) do
     {:ok, response}

@@ -23,7 +23,8 @@ config = Config.demeter_config!(demeter_url, network: network)
 queries = [
   :get_epoch_number,
   :get_current_era,
-  :get_current_block_height
+  :get_current_block_height,
+  :get_current_tip
 ]
 
 case Query.start_link(config) do
