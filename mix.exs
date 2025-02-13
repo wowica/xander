@@ -1,21 +1,23 @@
 defmodule Xander.MixProject do
   use Mix.Project
 
+  @description "An Elixir library for communicating with a Cardano node"
+  @source_url "https://github.com/wowica/xander"
+  @version "0.1.0"
+
   def project do
     [
       app: :xander,
-      version: "0.1.0",
+      version: @version,
       elixir: "~> 1.16",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       description: description(),
       package: package(),
       name: "Xander",
-      source_url: "https://github.com/wowica/xander",
-      docs: [
-        main: "Xander",
-        extras: ["README.md"]
-      ]
+      source_url: @source_url,
+      description: @description,
+      docs: docs()
     ]
   end
 
@@ -41,9 +43,17 @@ defmodule Xander.MixProject do
   defp package do
     [
       name: "xander",
+      maintainers: ["Carlos Souza", "Dave Miner"],
       files: ~w(lib .formatter.exs mix.exs README* LICENSE*),
       licenses: ["Apache-2.0"],
       links: %{"GitHub" => "https://github.com/wowica/xander"}
+    ]
+  end
+
+  defp docs do
+    [
+      main: "readme",
+      extras: ["README.md"]
     ]
   end
 end
