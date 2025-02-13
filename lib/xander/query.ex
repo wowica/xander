@@ -22,7 +22,12 @@ defmodule Xander.Query do
   ##############
 
   @doc """
-  Sends a query to the connected Cardano node.
+  Sends a query to the connected Cardano node. Available queries are:
+
+  * `:get_current_era`
+  * `:get_current_block_height`
+  * `:get_epoch_number`
+  * `:get_current_tip`
 
   For example:
 
@@ -30,7 +35,7 @@ defmodule Xander.Query do
   Xander.Query.run(pid, :get_epoch_number)
   ```
   """
-  @spec run(pid() | atom(), atom()) :: any()
+  @spec run(pid() | atom(), atom()) :: {atom(), any()}
   def run(pid \\ __MODULE__, query_name) do
     :gen_statem.call(pid, {:request, query_name})
   end
