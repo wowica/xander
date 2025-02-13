@@ -4,7 +4,7 @@ Elixir client for Cardano's Ouroboros networking protocol.
 
 ⚠️ This project is under active development. For a more stable solution to connect to a Cardano node using Elixir, see [Xogmios](https://github.com/wowica/xogmios).
 
-## Quickstart:
+## Quickstart
 
 Below is an example of how to connect to a Cardano node and run a query that returns the current tip of the ledger, similar to a `cardano-cli query tip` command.
 
@@ -56,6 +56,8 @@ docker compose up --build
 
 #### Via local UNIX socket
 
+🚨 **Note:** Socket files mapped via socat/ssh tunnels **DO NOT WORK** when using containers on OS X.
+
 Uncomment the `volumes` section in the `compose.yml` file to mount the local UNIX socket to the container's socket path.
 
 ```yml
@@ -82,7 +84,7 @@ CARDANO_NODE_PATH=/your/cardano/node.socket elixir run.exs
 
 This is useful if you want to run the application on a server different from your Cardano node.
 
-🚨 **Note:** Socket files mapped via socat/ssh tunnels do not work when using containers on OS X.
+🚨 **Note:** Socket files mapped via socat/ssh tunnels **DO NOT WORK** when using containers on OS X.
 
 1. Run socat on the remote server with the following command:
 
