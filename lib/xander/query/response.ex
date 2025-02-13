@@ -4,10 +4,16 @@ defmodule Xander.Query.Response do
   @message_response 4
   @slot_timeline 1
 
-  def parse_response(full_response) do
-    %{payload: response_payload} = Xander.Util.plex(full_response)
+  @type cbor :: binary()
 
-    case CBOR.decode(response_payload) do
+  @doc """
+  Parses the response from a query. Accepts CBOR encoded responses.
+  """
+  @spec parse_response(cbor()) :: {:ok, any()} | {:error, atom()}
+  def parse_response(cbor_response) do
+    %{payload: cbor_response_payload} = Xander.Util.plex(cbor_response)
+
+    case CBOR.decode(cbor_response_payload) do
       {:ok, decoded, ""} -> parse_cbor(decoded)
       {:error, _reason} -> {:error, :error_decoding_cbor}
     end
