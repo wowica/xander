@@ -22,12 +22,14 @@ defmodule Xander.Query do
   ##############
 
   @doc """
-  Sends a query to the connected Cardano node. Available queries are:
+  Sends a query to the connected Cardano node.
 
-  * `:get_current_era`
-  * `:get_current_block_height`
-  * `:get_epoch_number`
-  * `:get_current_tip`
+  Available queries are:
+
+    * `:get_current_era`
+    * `:get_current_block_height`
+    * `:get_epoch_number`
+    * `:get_current_tip`
 
   For example:
 
