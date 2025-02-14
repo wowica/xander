@@ -1,5 +1,8 @@
 # Xander
 
+![CI Status](https://github.com/wowica/xander/actions/workflows/ci.yml/badge.svg)
+[![Version](https://img.shields.io/hexpm/v/xander.svg)](https://hex.pm/packages/xander)
+
 Elixir client for Cardano's Ouroboros networking protocol.
 
 ⚠️ This project is under active development. For a more stable solution to connect to a Cardano node using Elixir, see [Xogmios](https://github.com/wowica/xogmios).
