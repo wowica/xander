@@ -29,14 +29,14 @@ queries = [
 
 case Query.start_link(config) do
   {:ok, pid} ->
-    IO.puts("Successfully connected to Demeter node")
+    IO.puts("Successfully connected to Demeter node 🎉\n")
 
     for query <- queries do
       case Query.run(pid, query) do
-      {:ok, result} ->
-        IO.puts("Query #{query} result: #{inspect(result)}")
+        {:ok, result} ->
+          IO.puts("Query #{query} result: #{inspect(result)}")
 
-      {:error, reason} ->
+        {:error, reason} ->
           IO.puts("Error querying #{inspect(query)}: #{inspect(reason)}")
           System.halt(1)
       end

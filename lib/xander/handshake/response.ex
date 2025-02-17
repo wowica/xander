@@ -1,8 +1,16 @@
 defmodule Xander.Handshake.Response do
+  @moduledoc """
+  This module is responsible for validating and parsing the
+  handshake response from a Cardano node.
+  """
+
   defstruct [:type, :version_number, :network_magic, :query]
 
   alias Xander.Util
 
+  @doc """
+  Validates the handshake response from a Cardano node.
+  """
   def validate(response) do
     %{payload: payload} = Util.plex(response)
 

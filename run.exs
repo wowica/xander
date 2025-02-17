@@ -3,7 +3,6 @@ Mix.install([
   {:xander, path: Path.expand(".")}
 ])
 
-
 socket_path = System.get_env("CARDANO_NODE_SOCKET_PATH")
 
 if socket_path == nil do
@@ -26,19 +25,18 @@ queries = [
 
 case Query.start_link(config) do
   {:ok, pid} ->
-    IO.puts("Successfully connected to Cardano node")
+    IO.puts("Successfully connected to Cardano node 🎉\n")
 
     for query <- queries do
       case Query.run(pid, query) do
-      {:ok, result} ->
-        IO.puts("Query #{query} result: #{inspect(result)}")
+        {:ok, result} ->
+          IO.puts("Query #{query} result: #{inspect(result)}")
 
-      {:error, reason} ->
+        {:error, reason} ->
           IO.puts("Error querying #{inspect(query)}: #{inspect(reason)}")
           System.halt(1)
       end
     end
-
 
   {:error, reason} ->
     IO.puts("Failed to connect to Cardano node: #{inspect(reason)}")

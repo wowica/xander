@@ -1,7 +1,9 @@
 defmodule Xander.Query do
   @moduledoc """
   Issues ledger queries to a Cardano node using the Node-to-Client (n2c) protocol.
+  This module implements the `gen_statem` behaviour.
   """
+
   @behaviour :gen_statem
 
   alias Xander.Handshake
@@ -19,10 +21,31 @@ defmodule Xander.Query do
   # Public API #
   ##############
 
+  @doc """
+  Sends a query to the connected Cardano node.
+
+  Available queries are:
+
+    * `:get_current_era`
+    * `:get_current_block_height`
+    * `:get_epoch_number`
+    * `:get_current_tip`
+
+  For example:
+
+  ```elixir
+  Xander.Query.run(pid, :get_epoch_number)
+  ```
+  """
+  @spec run(pid() | atom(), atom()) :: {atom(), any()}
   def run(pid \\ __MODULE__, query_name) do
     :gen_statem.call(pid, {:request, query_name})
   end
 
+  @doc """
+  Starts a new query process.
+  """
+  @spec start_link(Keyword.t()) :: GenServer.on_start()
   def start_link(network: network, path: path, port: port, type: type) do
     data = %__MODULE__{
       client: tcp_lib(type),
@@ -39,6 +62,10 @@ defmodule Xander.Query do
   # Callbacks #
   #############
 
+  @doc """
+  Returns a child specification for the process. This determines the
+  configuration of the OTP process when it is started by its parent.
+  """
   def child_spec(opts) do
     %{
       id: __MODULE__,
@@ -57,6 +84,11 @@ defmodule Xander.Query do
     actions = [{:next_event, :internal, :connect}]
     {:ok, :disconnected, data, actions}
   end
+
+  @doc """
+  Emits events when in the `disconnected` state.
+  """
+  def disconnected(_event_type, _event_content, _data)
 
   def disconnected(
         :internal,
@@ -84,6 +116,12 @@ defmodule Xander.Query do
     {:keep_state, data, actions}
   end
 
+  @doc """
+  Emits events when in the `connected` state. Must transition to the
+  `established_has_agency` state prior to sending queries to the node.
+  """
+  def connected(_event_type, _event_content, _data)
+
   def connected(
         :internal,
         :establish,
@@ -108,6 +146,11 @@ defmodule Xander.Query do
     end
   end
 
+  @doc """
+  Emits events when in the `established_no_agency` state.
+  """
+  def established_no_agency(_event_type, _event_content, _data)
+
   def established_no_agency(
         :internal,
         :acquire_agency,
@@ -122,6 +165,12 @@ defmodule Xander.Query do
     Logger.error("Connection closed")
     {:next_state, :disconnected, data}
   end
+
+  @doc """
+  Emits events when in the `established_has_agency` state. Can send queries
+  to the node when in this state.
+  """
+  def established_has_agency(_event_type, _event_content, _data)
 
   def established_has_agency(
         {:call, from},
