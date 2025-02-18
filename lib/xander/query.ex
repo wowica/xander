@@ -161,6 +161,17 @@ defmodule Xander.Query do
     {:next_state, :established_has_agency, data}
   end
 
+  def established_no_agency(
+        :internal,
+        :release_message,
+        %__MODULE__{client: client, socket: socket} = data
+      ) do
+    _ok = client.send(socket, Messages.msg_release())
+
+    actions = [{:next_event, :internal, :acquire_agency}]
+    {:next_state, :established_no_agency, data, actions}
+  end
+
   def established_no_agency(:info, {:tcp_closed, socket}, %__MODULE__{socket: socket} = data) do
     Logger.error("Connection closed")
     {:next_state, :disconnected, data}
@@ -199,9 +210,14 @@ defmodule Xander.Query do
       ) do
     {:ok, query_response} = Response.parse_response(bytes)
     {{:value, caller}, data} = get_and_update_in(data.queue, &:queue.out/1)
-    # This action issues the response back to the client
-    actions = [{:reply, caller, {:ok, query_response}}]
-    {:keep_state, data, actions}
+
+    # Reply to caller and trigger release_message action in the new state
+    actions = [
+      {:reply, caller, {:ok, query_response}},
+      {:next_event, :internal, :release_message}
+    ]
+
+    {:next_state, :established_no_agency, data, actions}
   end
 
   def established_has_agency(:info, {:tcp_closed, socket}, %__MODULE__{socket: socket} = data) do
