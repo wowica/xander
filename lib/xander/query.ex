@@ -1,7 +1,7 @@
 defmodule Xander.Query do
   @moduledoc """
   Issues ledger queries to a Cardano node using the Node-to-Client (n2c) protocol.
-  This module implements the `gen_statem` behaviour.
+  This module implements the `gen_statem` OTP behaviour.
   """
 
   @behaviour :gen_statem
@@ -133,12 +133,12 @@ defmodule Xander.Query do
         Handshake.Proposal.version_message(@active_n2c_versions, network)
       )
 
-    case client.recv(socket, 0, 5_000) do
+    case client.recv(socket, 0, _timeout = 5_000) do
       {:ok, full_response} ->
         {:ok, _handshake_response} = Handshake.Response.validate(full_response)
 
-        actions = [{:next_event, :internal, :acquire_agency}]
-        {:next_state, :established_no_agency, data, actions}
+        # Transitions to idle state
+        {:next_state, :established_no_agency, data}
 
       {:error, reason} ->
         Logger.error("Error establishing connection #{inspect(reason)}")
@@ -148,65 +148,107 @@ defmodule Xander.Query do
 
   @doc """
   Emits events when in the `established_no_agency` state.
+  This maps to the StIdle state in the Cardano Local State Query protocol.
+  This is the state where the process waits for a query to be made.
   """
   def established_no_agency(_event_type, _event_content, _data)
 
   def established_no_agency(
-        :internal,
-        :acquire_agency,
+        {:call, from},
+        {:request, query_name},
         %__MODULE__{client: client, socket: socket} = data
       ) do
+    # Send acquire message to transition to Acquiring state
     :ok = client.send(socket, Messages.msg_acquire())
-    {:ok, _acquire_response} = client.recv(socket, 0, 5_000)
-    {:next_state, :established_has_agency, data}
+
+    # Handle acquire response (MsgAcquired) to transition to Acquired state
+    case client.recv(socket, 0, _timeout = 5_000) do
+      {:ok, _acquire_response} ->
+        # Set socket to active mode to receive async messages from node
+        :ok = setopts_lib(client).setopts(socket, active: :once)
+
+        # Track the caller and query_name, then transition to
+        # established_has_agency state prior to sending the query.
+        data = update_in(data.queue, &:queue.in({from, query_name}, &1))
+        {:next_state, :established_has_agency, data, [{:next_event, :internal, :send_query}]}
+
+      {:error, reason} ->
+        Logger.error("Failed to acquire state: #{inspect(reason)}")
+        actions = [{:reply, from, {:error, :acquire_failed}}]
+        {:keep_state, data, actions}
+    end
   end
 
   def established_no_agency(:info, {:tcp_closed, socket}, %__MODULE__{socket: socket} = data) do
-    Logger.error("Connection closed")
+    Logger.error("Connection closed while in established_no_agency")
     {:next_state, :disconnected, data}
   end
 
   @doc """
-  Emits events when in the `established_has_agency` state. Can send queries
-  to the node when in this state.
+  Emits events when in the `established_has_agency` state.
+  This maps to the Querying state in the Cardano Local State Query protocol.
   """
   def established_has_agency(_event_type, _event_content, _data)
 
   def established_has_agency(
-        {:call, from},
-        {:request, request},
+        :internal,
+        :send_query,
         %__MODULE__{client: client, socket: socket} = data
       ) do
-    :ok = setopts_lib(client).setopts(socket, active: :once)
+    # Get the current query_name from queue without removing it
+    {:value, {_from, query_name}} = :queue.peek(data.queue)
 
-    message =
-      case request do
-        :get_current_era -> Messages.get_current_era()
-        :get_current_block_height -> Messages.get_current_block_height()
-        :get_epoch_number -> Messages.get_epoch_number()
-        :get_current_tip -> Messages.get_current_tip()
-      end
-
-    :ok = client.send(socket, message)
-    data = update_in(data.queue, &:queue.in(from, &1))
+    # Send query to node and remain in established_has_agency state
+    :ok = client.send(socket, build_query_message(query_name))
     {:keep_state, data}
   end
 
+  # This function is invoked due to the socket being set to active mode.
+  # It receives a response from the node, sends a release message and
+  # then transitions back to the established_no_agency state.
   def established_has_agency(
         :info,
         {_tcp_or_ssl, socket, bytes},
-        %__MODULE__{socket: socket} = data
+        %__MODULE__{client: client, socket: socket} = data
       ) do
-    {:ok, query_response} = Response.parse_response(bytes)
-    {{:value, caller}, data} = get_and_update_in(data.queue, &:queue.out/1)
-    # This action issues the response back to the client
-    actions = [{:reply, caller, {:ok, query_response}}]
-    {:keep_state, data, actions}
+    # Parse query response (MsgResult)
+    case Response.parse_response(bytes) do
+      {:ok, query_response} ->
+        # Get the caller from our queue
+        {{:value, {caller, _query_name}}, new_data} = get_and_update_in(data.queue, &:queue.out/1)
+
+        # Send release message to transition back to StIdle
+        :ok = client.send(socket, Messages.msg_release())
+
+        # Reply to caller and transition back to established_no_agency (StIdle)
+        actions = [{:reply, caller, {:ok, query_response}}]
+        {:next_state, :established_no_agency, new_data, actions}
+
+      {:error, reason} ->
+        Logger.error("Failed to parse response: #{inspect(reason)}")
+        {{:value, {caller, _query_name}}, new_data} = get_and_update_in(data.queue, &:queue.out/1)
+        actions = [{:reply, caller, {:error, :parse_failed}}]
+        {:next_state, :established_no_agency, new_data, actions}
+    end
   end
 
   def established_has_agency(:info, {:tcp_closed, socket}, %__MODULE__{socket: socket} = data) do
-    Logger.error("Connection closed")
+    Logger.error("Connection closed while querying")
     {:next_state, :disconnected, data}
+  end
+
+  def established_has_agency(:timeout, _event_content, data) do
+    Logger.error("Query timeout")
+    {:next_state, :established_no_agency, data}
+  end
+
+  defp build_query_message(query_name) do
+    case query_name do
+      :get_current_era -> Messages.get_current_era()
+      :get_current_block_height -> Messages.get_current_block_height()
+      :get_epoch_number -> Messages.get_epoch_number()
+      :get_current_tip -> Messages.get_current_tip()
+    end
   end
 
   defp maybe_local_path(path, :socket), do: {:local, path}
