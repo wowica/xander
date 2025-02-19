@@ -44,7 +44,7 @@ defmodule Xander.MixProject do
     [
       name: "xander",
       maintainers: ["Carlos Souza", "Dave Miner"],
-      files: ~w(lib .formatter.exs mix.exs README* LICENSE*),
+      files: ~w(lib .formatter.exs mix.exs README*),
       licenses: ["Apache-2.0"],
       links: %{"GitHub" => "https://github.com/wowica/xander"}
     ]
