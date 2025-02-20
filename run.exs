@@ -3,10 +3,10 @@ Mix.install([
   {:xander, path: Path.expand(".")}
 ])
 
-socket_path = System.get_env("CARDANO_NODE_SOCKET_PATH")
+socket_path = System.get_env("CARDANO_NODE_SOCKET_PATH", "/tmp/cardano-node.socket")
 
-if socket_path == nil do
-  IO.puts("Error: CARDANO_NODE_SOCKET_PATH environment variable is not set")
+if !File.exists?(socket_path) do
+  IO.puts("Error: socket file path #{socket_path} does not exist")
   System.halt(1)
 end
 
