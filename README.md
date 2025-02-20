@@ -39,43 +39,46 @@ For a more detailed description of different ways to use this library, read the 
 
 ## Running via Docker
 
-### Using Demeter.run
+In order to run the application via Docker, you need to build the image first:
 
-The demo application can connect to a Cardano node at [Demeter.run](https://demeter.run/) 🪄 
-
-First, create a Node on Demeter. Then, set your Node's url in the `DEMETER_URL` environment variable in the `.env` file. 
-
-For example:
-
-```bash
-DEMETER_URL=https://your-node-at.demeter.run
+```
+docker build -t xander .
 ```
 
-Then, run the application using Docker Compose:
+With the image built, you can now connect to either a local Cardano node via a UNIX socket or to a node at Demeter.run.
 
-```bash
-docker compose up --build
-```
+#### 1. Connecting via a local UNIX socket
 
-#### Via local UNIX socket
+This assumes you have access to a fully synced Cardano node.
 
 🚨 **Note:** Socket files mapped via socat/ssh tunnels **DO NOT WORK** when using containers on OS X.
 
-Uncomment the `volumes` section in the `compose.yml` file to mount the local UNIX socket to the container's socket path.
+Run the previously built Docker image with the `-v` argument, which mounts the path of your local socket path to 
+the container's default socket path (`/tmp/cardano-node.socket`):
 
-```yml
-volumes:
-  - /path/to/node.socket:/tmp/cardano-node.socket
+```
+docker run --rm \
+  -v /your/local/node.socket:/tmp/cardano-node.socket \
+  xander elixir run.exs
 ```
 
-Then, run the application using Docker Compose:
+#### 2. Connecting to a node at Demeter.run
+
+The demo application can connect to a Cardano node at [Demeter.run](https://demeter.run/) 🪄 
+
+First, create a Node on Demeter and grab the Node's URL.
+
+Then, run the Docker image with the `DEMETER_URL` environment variable set to your Node's URL:
+
 ```bash
-docker compose up --build
+docker run --rm \
+  -e DEMETER_URL=https://your-node-at.demeter.run \
+  xander elixir run_with_demeter.exs
 ```
 
 ## Running natively with an Elixir local dev environment
 
-#### Via local UNIX socket
+#### a) Via local UNIX socket
 
 Run the following command using your own Cardano node's socket path:
 
@@ -107,10 +110,16 @@ socat UNIX-LISTEN:/tmp/cardano_node.socket,reuseaddr,fork TCP:localhost:3002
 ssh -N -L 3002:localhost:3002 user@remote-server-ip
 ```
 
-#### Using Demeter.run
+4. Run the example script:
+
+```bash
+CARDANO_NODE_PATH=/tmp/cardano_node.socket elixir run.exs
+```
+
+#### b) Using Demeter.run
 
 To connect to a node at Demeter.run, set `DEMETER_URL` to your Node Demeter URL.
 
 ```bash
-DEMETER_URL=https://your-node-at.demeter.run mix query_current_era
+DEMETER_URL=https://your-node-at.demeter.run elixir run_with_demeter.exs
 ```
