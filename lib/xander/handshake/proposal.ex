@@ -3,13 +3,14 @@ defmodule Xander.Handshake.Proposal do
   Builds handshake messages for node-to-client communication.
   """
 
-  @type network_type :: :mainnet | :preprod | :preview | :sanchonet
+  @type network_type :: :mainnet | :preprod | :preview | :sanchonet | :yaci_devkit
 
   @network_magic [
     mainnet: 764_824_073,
     preprod: 1,
     preview: 2,
-    sanchonet: 4
+    sanchonet: 4,
+    yaci_devkit: 42
   ]
 
   @version_numbers %{

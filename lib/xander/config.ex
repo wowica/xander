@@ -60,8 +60,9 @@ defmodule Xander.Config do
 
   # Validates and normalizes the configuration options.
   defp validate_config!(opts) do
-    if opts[:network] not in [:mainnet, :preprod, :preview, :sanchonet] do
-      raise ArgumentError, "network must be :mainnet, :preprod, :preview, or :sanchonet"
+    if opts[:network] not in [:mainnet, :preprod, :preview, :sanchonet, :yaci_devkit] do
+      raise ArgumentError,
+            "network must be :mainnet, :preprod, :preview, :sanchonet, or :yaci_devkit"
     end
 
     if opts[:type] not in [:socket, :ssl] do
