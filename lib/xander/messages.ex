@@ -22,6 +22,10 @@ defmodule Xander.Messages do
   @message_acquire [8]
   @message_release [5]
 
+  # See the CDDL for details on mapping of messages to numbers.
+  # https://github.com/IntersectMBO/ouroboros-network/blob/main/ouroboros-network-protocols/cddl/specs/local-tx-submission.cddl
+  @message_submit_tx 0
+
   @doc """
   Acquires a snapshot of the mempool, allowing the protocol to make queries.
 
@@ -133,7 +137,17 @@ defmodule Xander.Messages do
     header(@mini_protocols.local_state_query, bitstring_payload) <> bitstring_payload
   end
 
+  @spec transaction(binary()) :: binary()
+  def transaction(tx_hash) do
+    payload = build_transaction(tx_hash)
+    bitstring_payload = CBOR.encode(payload)
+
+    header(@mini_protocols.local_tx_submission, bitstring_payload) <> bitstring_payload
+  end
+
   defp build_query(query), do: [@message_query, query]
+
+  defp build_transaction(tx_hash), do: [@message_submit_tx, tx_hash]
 
   # middle 16 bits are: 1 bit == 0 for initiator and 15 bits for the mini protocol ID
   defp header(mini_protocol_id, payload),
