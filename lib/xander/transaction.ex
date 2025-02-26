@@ -177,26 +177,23 @@ defmodule Xander.Transaction do
 
   def busy(
         :internal,
-        {:send_tx, tx_hash},
+        {:send_tx, tx_hex},
         %__MODULE__{client: client, socket: socket} = data
       ) do
-    dbg("INTERNAL SEND TX")
-
-    :ok = client.send(socket, Messages.transaction(tx_hash))
+    :ok = client.send(socket, Messages.transaction(tx_hex))
 
     dbg("SENT TX")
     # Handle acquire response (MsgAcquired) to transition to Acquired state
     case client.recv(socket, 0, _timeout = 5_000) do
       {:ok, tx_response} ->
+        # TODO: parse response
         # Set socket to active mode to receive async messages from node
         :ok = setopts_lib(client).setopts(socket, active: :once)
 
-        dbg(tx_response)
+        IO.inspect("Transaction submitted successfully")
 
-        # Track the caller and query_name, then transition to
-        # established_has_agency state prior to sending the query.
-        # data = update_in(data.queue, &:queue.in({from, :send_tx}, &1))
-        {:next_state, :established_has_agency, data, [{:next_event, :internal, :send_query}]}
+        dbg(tx_response)
+        {:next_state, :idle, data}
 
       {:error, reason} ->
         Logger.error("Failed to acquire state: #{inspect(reason)}")
@@ -204,8 +201,6 @@ defmodule Xander.Transaction do
         actions = [{:reply, "", {:error, :acquire_failed}}]
         {:keep_state, data, actions}
     end
-
-    # {:keep_state, data}
   end
 
   def busy(:info, {:tcp_closed, socket}, %__MODULE__{socket: socket} = data) do
