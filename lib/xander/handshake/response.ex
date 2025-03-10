@@ -17,7 +17,7 @@ defmodule Xander.Handshake.Response do
     case CBOR.decode(payload) do
       # msgAcceptVersion
       {:ok, [1, version, [magic, query]], ""} ->
-        if version in [32783, 32784] do
+        if version in [32783, 32784, 32785] do
           {:ok,
            %__MODULE__{
              network_magic: magic,
@@ -26,7 +26,7 @@ defmodule Xander.Handshake.Response do
              version_number: version
            }}
         else
-          {:error, "Only versions 32783 and 32784 are supported."}
+          {:error, "Only versions 32783, 32784, and 32785 are supported."}
         end
 
       # msgRefuse

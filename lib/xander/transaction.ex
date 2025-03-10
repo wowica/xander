@@ -7,43 +7,18 @@ defmodule Xander.Transaction do
 
   alias Xander.Handshake
   alias Xander.Messages
-  alias Xander.Query.Response
+  alias Xander.Transaction.Response
 
   require Logger
 
   @basic_tcp_opts [:binary, active: false, send_timeout: 4_000]
-  @active_n2c_versions [9, 10, 11, 12, 13, 14, 15, 16]
+  @active_n2c_versions [9, 10, 11, 12, 13, 14, 15, 16, 17]
 
-  defstruct [:client, :path, :port, :socket, :network, queue: :queue.new()]
+  defstruct [:client, :path, :port, :socket, :network, :caller, queue: :queue.new()]
 
   ##############
   # Public API #
   ##############
-
-  @doc """
-  Sends a query to the connected Cardano node.
-
-  Available queries are:
-
-    * `:get_current_era`
-    * `:get_current_block_height`
-    * `:get_epoch_number`
-    * `:get_current_tip`
-
-  For example:
-
-  ```elixir
-  Xander.Query.run(pid, :get_epoch_number)
-  ```
-  """
-  @spec run(pid() | atom(), atom()) :: {atom(), any()}
-  def run(pid \\ __MODULE__, query_name) do
-    :gen_statem.call(pid, {:request, query_name})
-  end
-
-  # def send(pid \\ __MODULE__, :send_tx, tx_hash) do
-  #   :gen_statem.call(pid, {:request, :send_tx, tx_hash})
-  # end
 
   @doc """
   Sends a transaction to the connected Cardano node.
@@ -51,7 +26,7 @@ defmodule Xander.Transaction do
   For example:
 
   ```elixir
-  Xander.Query.run(pid, :get_epoch_number)
+  Xander.Query.send(pid, tx_hash)
   ```
   """
   def send(pid \\ __MODULE__, tx_hash) do
@@ -111,6 +86,8 @@ defmodule Xander.Transaction do
         :connect,
         %__MODULE__{client: client, path: path, port: port} = data
       ) do
+    Logger.info("Connecting to #{inspect(path)}:#{inspect(port)}")
+
     case client.connect(
            maybe_parse_path(path),
            port,
@@ -143,6 +120,8 @@ defmodule Xander.Transaction do
         :establish,
         %__MODULE__{client: client, socket: socket, network: network} = data
       ) do
+    Logger.info("Establishing handshake...")
+
     :ok =
       client.send(
         socket,
@@ -153,8 +132,8 @@ defmodule Xander.Transaction do
       {:ok, full_response} ->
         case Handshake.Response.validate(full_response) do
           {:ok, _handshake_response} ->
-            dbg("CONNECTED")
             # Transitions to idle state
+            Logger.info("Handshake successful")
             {:next_state, :idle, data}
 
           {:refused, response} ->
@@ -178,28 +157,58 @@ defmodule Xander.Transaction do
   def busy(
         :internal,
         {:send_tx, tx_hex},
-        %__MODULE__{client: client, socket: socket} = data
+        %__MODULE__{client: client, socket: socket, caller: from} = data
       ) do
     :ok = client.send(socket, Messages.transaction(tx_hex))
 
-    dbg("SENT TX")
-    # Handle acquire response (MsgAcquired) to transition to Acquired state
     case client.recv(socket, 0, _timeout = 5_000) do
       {:ok, tx_response} ->
-        # TODO: parse response
         # Set socket to active mode to receive async messages from node
         :ok = setopts_lib(client).setopts(socket, active: :once)
 
-        IO.inspect("Transaction submitted successfully")
+        payload = Response.parse_response(tx_response)
 
-        dbg(tx_response)
-        {:next_state, :idle, data}
+        case CBOR.decode(payload) do
+          {:ok, [1], <<>>} ->
+            Logger.info("Transaction submitted successfully")
+            # Reply to caller with success
+            actions = [{:reply, from, {:ok, :accepted}}]
+
+            data = Map.delete(data, :caller)
+            {:next_state, :idle, data, actions}
+
+          {:ok, [2, failure_reason], <<>>} ->
+            Logger.error("Transaction submission failed. Reason: #{inspect(failure_reason)}")
+            # Reply to caller with failure
+            actions = [{:reply, from, {:error, {:rejected, failure_reason}}}]
+
+            data = Map.delete(data, :caller)
+            {:next_state, :idle, data, actions}
+
+          {:ok, [3], <<>>} ->
+            Logger.info(~c"ltMsgDone message received from protocol.")
+            # Reply to caller with error
+            actions = [{:reply, from, {:error, :disconnected}}]
+
+            data = Map.delete(data, :caller)
+            {:next_state, :disconnected, data, actions}
+
+          {:error, error} ->
+            Logger.error("Failed to decode response: #{inspect(error)}")
+            # Reply to caller with error
+            actions = [{:reply, from, {:error, {:decode_failed, error}}}]
+
+            data = Map.delete(data, :caller)
+            {:next_state, :idle, data, actions}
+        end
 
       {:error, reason} ->
-        Logger.error("Failed to acquire state: #{inspect(reason)}")
-        # actions = [{:reply, from, {:error, :acquire_failed}}]
-        actions = [{:reply, "", {:error, :acquire_failed}}]
-        {:keep_state, data, actions}
+        Logger.error("Failed to send transaction: #{inspect(reason)}")
+        # Reply to caller with error
+        actions = [{:reply, from, {:error, {:send_failed, reason}}}]
+        # Remove caller from data
+        data = Map.delete(data, :caller)
+        {:next_state, :idle, data, actions}
     end
   end
 
@@ -208,32 +217,22 @@ defmodule Xander.Transaction do
     {:next_state, :disconnected, data}
   end
 
-  def busy(:info, {_tcp_or_ssl, socket, bytes}, %__MODULE__{socket: socket} = data) do
-    case Response.parse_response(bytes) do
-      {:ok, _response} ->
-        # Handle successful transaction submission
-        {:next_state, :idle, data}
-
-      {:error, reason} ->
-        Logger.error("Transaction submission failed: #{inspect(reason)}")
-        {:next_state, :idle, data}
-    end
-  end
-
   @doc """
   Emits events when in the `idle` state.
   This maps to the StIdle state in the Cardano Local State Query protocol.
   This is the state where the process waits for a query to be made.
   """
+
   def idle(_event_type, _event_content, _data)
 
   def idle(
-        {:call, _from},
+        {:call, from},
         {:request, :send_tx, tx_hash},
         %__MODULE__{client: _client, socket: _socket} = data
       ) do
-    dbg("idle CALL")
-    dbg(tx_hash)
+    # Store the caller in data and don't reply immediately
+    data = Map.put(data, :caller, from)
+
     {:next_state, :busy, data, [{:next_event, :internal, {:send_tx, tx_hash}}]}
   end
 
