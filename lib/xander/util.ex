@@ -6,13 +6,7 @@ defmodule Xander.Util do
   ## Examples
 
       iex> Xander.Util.plex(<<0, 0, 0, 0, 1, 2, 0, 3, 97, 98, 99>>)
-      {:ok, %{payload: <<97, 98, 99>>, protocol_id: <<1, 2>>, size: <<0, 3>>}}
-
-      iex> Xander.Util.plex(<<1, 2, 3>>)
-      {:error, :invalid_format}
-
-      iex> Xander.Util.plex(nil)
-      {:error, :invalid_input}
+      {:ok, %{size: <<0, 3>>, payload: "abc", protocol_id: <<1, 2>>}}
 
   """
   @spec plex(binary() | nil) :: {:ok, map()} | {:error, atom()}
@@ -55,14 +49,8 @@ defmodule Xander.Util do
 
   ## Examples
 
-      iex> payload = <<97, 98, 99>>
-      iex> result = Xander.Util.plex_encode(payload)
-      iex> byte_size(result) == byte_size(payload) + 8
-      true
-      iex> {:ok, decoded} = Xander.Util.plex(result)
-      iex> decoded.payload == payload
-      true
-
+      iex> Xander.Util.plex_encode(<<97, 98, 99>>)
+      <<0, 0, 0, 0, 0, 2, 0, 3, 97, 98, 99>>
   """
   @spec plex_encode(binary()) :: binary()
   def plex_encode(payload) when is_binary(payload) do

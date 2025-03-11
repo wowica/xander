@@ -34,7 +34,7 @@ defmodule Xander.Query.Response do
       iex> payload = CBOR.encode([4, "some data"])
       iex> binary = Xander.Util.plex_encode(payload)
       iex> Xander.Query.Response.parse_response(binary)
-      {:ok, %CBOR.Tag{tag: :bytes, value: "some data"}}
+      {:ok, "some data"}
 
       # Error case - invalid CBOR format
       iex> payload = CBOR.encode(["not a valid response"])

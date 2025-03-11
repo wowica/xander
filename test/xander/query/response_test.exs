@@ -1,5 +1,5 @@
 defmodule Xander.Query.ResponseTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case
 
   doctest Xander.Query.Response
 end
