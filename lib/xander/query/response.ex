@@ -8,14 +8,59 @@ defmodule Xander.Query.Response do
 
   @doc """
   Parses the response from a query. Accepts CBOR encoded responses.
+
+  ## Examples
+
+      # Current tip query response (slot number and block hash)
+      iex> block_bytes = <<0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15>>
+      iex> payload = CBOR.encode([4, [12345, %CBOR.Tag{tag: :bytes, value: block_bytes}]])
+      iex> binary = Xander.Util.plex_encode(payload)
+      iex> Xander.Query.Response.parse_response(binary)
+      {:ok, {12345, "000102030405060708090a0b0c0d0e0f"}}
+
+      # Current block height query response
+      iex> payload = CBOR.encode([4, [1, 123456]])
+      iex> binary = Xander.Util.plex_encode(payload)
+      iex> Xander.Query.Response.parse_response(binary)
+      {:ok, 123456}
+
+      # Epoch number query response
+      iex> payload = CBOR.encode([4, [42]])
+      iex> binary = Xander.Util.plex_encode(payload)
+      iex> Xander.Query.Response.parse_response(binary)
+      {:ok, 42}
+
+      # Generic response
+      iex> payload = CBOR.encode([4, "some data"])
+      iex> binary = Xander.Util.plex_encode(payload)
+      iex> Xander.Query.Response.parse_response(binary)
+      {:ok, %CBOR.Tag{tag: :bytes, value: "some data"}}
+
+      # Error case - invalid CBOR format
+      iex> payload = CBOR.encode(["not a valid response"])
+      iex> binary = Xander.Util.plex_encode(payload)
+      iex> Xander.Query.Response.parse_response(binary)
+      {:error, :invalid_cbor}
+
+      # Error case - invalid binary format
+      iex> Xander.Query.Response.parse_response(<<0, 1, 2, 3>>)
+      {:error, :invalid_format}
+
+      # Error case - nil input
+      iex> Xander.Query.Response.parse_response(nil)
+      {:error, :invalid_input}
   """
   @spec parse_response(cbor()) :: {:ok, any()} | {:error, atom()}
   def parse_response(cbor_response) do
-    %{payload: cbor_response_payload} = Xander.Util.plex(cbor_response)
+    case Xander.Util.plex(cbor_response) do
+      {:ok, %{payload: cbor_response_payload}} ->
+        case CBOR.decode(cbor_response_payload) do
+          {:ok, decoded, ""} -> parse_cbor(decoded)
+          {:error, _reason} -> {:error, :error_decoding_cbor}
+        end
 
-    case CBOR.decode(cbor_response_payload) do
-      {:ok, decoded, ""} -> parse_cbor(decoded)
-      {:error, _reason} -> {:error, :error_decoding_cbor}
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 

@@ -16,6 +16,19 @@ defmodule Xander.Transaction do
 
   defstruct [:client, :path, :port, :socket, :network, :caller, queue: :queue.new()]
 
+  @typedoc """
+  Type defining the Transaction struct.
+  """
+  @type t :: %__MODULE__{
+          client: atom(),
+          path: any(),
+          port: non_neg_integer() | 0,
+          socket: any(),
+          network: any(),
+          caller: any(),
+          queue: :queue.queue()
+        }
+
   ##############
   # Public API #
   ##############
@@ -26,15 +39,16 @@ defmodule Xander.Transaction do
   For example:
 
   ```elixir
-  Xander.Query.send(pid, tx_hash)
+  Xander.Transaction.send(tx_hash)
   ```
   """
+  @spec send(atom() | pid(), binary()) :: :ok | {:error, atom()}
   def send(pid \\ __MODULE__, tx_hash) do
     :gen_statem.call(pid, {:request, :send_tx, tx_hash})
   end
 
   @doc """
-  Starts a new query process.
+  Starts a new transaction process.
   """
   @spec start_link(Keyword.t()) :: GenServer.on_start()
   def start_link(network: network, path: path, port: port, type: type) do
@@ -57,6 +71,13 @@ defmodule Xander.Transaction do
   Returns a child specification for the process. This determines the
   configuration of the OTP process when it is started by its parent.
   """
+  @spec child_spec(Keyword.t()) :: %{
+          :id => atom(),
+          :start => {atom(), atom(), Keyword.t()},
+          :type => atom(),
+          :restart => atom(),
+          :shutdown => integer()
+        }
   def child_spec(opts) do
     %{
       id: __MODULE__,
@@ -71,6 +92,8 @@ defmodule Xander.Transaction do
   def callback_mode, do: :state_functions
 
   @impl true
+  @spec init(Keyword.t()) ::
+          {:ok, :disconnected, Keyword.t(), [{:next_event, :internal, :connect}]}
   def init(data) do
     actions = [{:next_event, :internal, :connect}]
     {:ok, :disconnected, data, actions}
@@ -79,8 +102,10 @@ defmodule Xander.Transaction do
   @doc """
   Emits events when in the `disconnected` state.
   """
-  def disconnected(_event_type, _event_content, _data)
-
+  @spec disconnected(:info | :internal | {:call, any()}, any(), t()) ::
+          {:next_state, :disconnected, t()}
+          | {:next_state, :connected, t(), [{:next_event, :internal, :establish}]}
+          | {:keep_state, t(), [{:reply, any(), {:error, :disconnected}}]}
   def disconnected(
         :internal,
         :connect,
@@ -113,8 +138,9 @@ defmodule Xander.Transaction do
   Emits events when in the `connected` state. Must transition to the
   `established_has_agency` state prior to sending queries to the node.
   """
-  def connected(_event_type, _event_content, _data)
-
+  @spec connected(:info | :internal, :establish | any(), t()) ::
+          {:next_state, :disconnected, t()}
+          | {:next_state, :idle, t()}
   def connected(
         :internal,
         :establish,
@@ -139,10 +165,6 @@ defmodule Xander.Transaction do
           {:refused, response} ->
             Logger.error("Handshake refused by node. Response: #{inspect(response)}")
 
-            Logger.error(
-              "Check if network magic (#{inspect(network)}) and versions #{inspect(@active_n2c_versions)} are correct"
-            )
-
             {:next_state, :disconnected, data}
         end
 
@@ -152,6 +174,9 @@ defmodule Xander.Transaction do
     end
   end
 
+  @spec busy(:info | :internal, {:send_tx, binary()} | {:tcp_closed, any()}, t()) ::
+          {:next_state, :disconnected, t()}
+          | {:next_state, :disconnected | :idle, t(), [{:reply, any(), {:error | :ok, any()}}]}
   def busy(_event_type, _event_content, _data)
 
   def busy(
@@ -159,57 +184,25 @@ defmodule Xander.Transaction do
         {:send_tx, tx_hex},
         %__MODULE__{client: client, socket: socket, caller: from} = data
       ) do
+    :ok = setopts_lib(client).setopts(socket, active: :once)
+
     :ok = client.send(socket, Messages.transaction(tx_hex))
 
-    case client.recv(socket, 0, _timeout = 5_000) do
-      {:ok, tx_response} ->
-        # Set socket to active mode to receive async messages from node
-        :ok = setopts_lib(client).setopts(socket, active: :once)
+    {next_state, actions} =
+      case client.recv(socket, 0, _timeout = 5_000) do
+        {:ok, tx_response} ->
+          handle_tx_response(tx_response, from)
 
-        payload = Response.parse_response(tx_response)
+        {:error, reason} ->
+          Logger.error("Failed to send transaction: #{inspect(reason)}")
+          # Reply to caller with error
+          actions = [{:reply, from, {:error, {:send_failed, reason}}}]
 
-        case CBOR.decode(payload) do
-          {:ok, [1], <<>>} ->
-            Logger.info("Transaction submitted successfully")
-            # Reply to caller with success
-            actions = [{:reply, from, {:ok, :accepted}}]
+          {:idle, actions}
+      end
 
-            data = Map.delete(data, :caller)
-            {:next_state, :idle, data, actions}
-
-          {:ok, [2, failure_reason], <<>>} ->
-            Logger.error("Transaction submission failed. Reason: #{inspect(failure_reason)}")
-            # Reply to caller with failure
-            actions = [{:reply, from, {:error, {:rejected, failure_reason}}}]
-
-            data = Map.delete(data, :caller)
-            {:next_state, :idle, data, actions}
-
-          {:ok, [3], <<>>} ->
-            Logger.info(~c"ltMsgDone message received from protocol.")
-            # Reply to caller with error
-            actions = [{:reply, from, {:error, :disconnected}}]
-
-            data = Map.delete(data, :caller)
-            {:next_state, :disconnected, data, actions}
-
-          {:error, error} ->
-            Logger.error("Failed to decode response: #{inspect(error)}")
-            # Reply to caller with error
-            actions = [{:reply, from, {:error, {:decode_failed, error}}}]
-
-            data = Map.delete(data, :caller)
-            {:next_state, :idle, data, actions}
-        end
-
-      {:error, reason} ->
-        Logger.error("Failed to send transaction: #{inspect(reason)}")
-        # Reply to caller with error
-        actions = [{:reply, from, {:error, {:send_failed, reason}}}]
-        # Remove caller from data
-        data = Map.delete(data, :caller)
-        {:next_state, :idle, data, actions}
-    end
+    data = Map.delete(data, :caller)
+    {:next_state, next_state, data, actions}
   end
 
   def busy(:info, {:tcp_closed, socket}, %__MODULE__{socket: socket} = data) do
@@ -222,7 +215,13 @@ defmodule Xander.Transaction do
   This maps to the StIdle state in the Cardano Local State Query protocol.
   This is the state where the process waits for a query to be made.
   """
-
+  @spec idle(
+          :info | :internal | {:call, any()},
+          {:request, atom(), atom()} | {:tcp_closed, any()},
+          t()
+        ) ::
+          {:next_state, :disconnected, t()}
+          | {:next_state, :busy, t(), [{:next_event, :internal, {:send_tx, binary()}}]}
   def idle(_event_type, _event_content, _data)
 
   def idle(
@@ -239,6 +238,34 @@ defmodule Xander.Transaction do
   def idle(:info, {:tcp_closed, socket}, %__MODULE__{socket: socket} = data) do
     Logger.error("Connection closed while in idle")
     {:next_state, :disconnected, data}
+  end
+
+  defp handle_tx_response(tx_response, from) do
+    case Response.parse_response(tx_response) do
+      {:ok, :accepted} ->
+        Logger.info("Transaction submitted successfully")
+
+        actions = [{:reply, from, {:ok, :accepted}}]
+        {:idle, actions}
+
+      {:ok, :disconnected} ->
+        Logger.info(~c"ltMsgDone message received from protocol.")
+
+        actions = [{:reply, from, {:error, {:disconnected, :disconnected}}}]
+        {:disconnected, actions}
+
+      {:ok, {:rejected, failure_reason}} ->
+        Logger.error("Transaction submission failed. Reason: #{inspect(failure_reason)}")
+
+        actions = [{:reply, from, {:error, {:rejected, failure_reason}}}]
+        {:idle, actions}
+
+      {:error, error} ->
+        Logger.error("Failed to decode transaction response: #{inspect(error)}")
+
+        actions = [{:reply, from, {:error, {:decode_failed, error}}}]
+        {:idle, actions}
+    end
   end
 
   defp maybe_local_path(path, :socket), do: {:local, path}
