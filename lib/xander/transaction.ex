@@ -184,8 +184,6 @@ defmodule Xander.Transaction do
         {:send_tx, tx_hex},
         %__MODULE__{client: client, socket: socket, caller: from} = data
       ) do
-    :ok = setopts_lib(client).setopts(socket, active: :once)
-
     :ok = client.send(socket, Messages.transaction(tx_hex))
 
     {next_state, actions} =
@@ -294,7 +292,4 @@ defmodule Xander.Transaction do
         ]
 
   defp tcp_opts(_, _), do: @basic_tcp_opts
-
-  defp setopts_lib(:ssl), do: :ssl
-  defp setopts_lib(_), do: :inet
 end

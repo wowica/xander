@@ -12,7 +12,8 @@ defmodule Xander.Handshake.Response do
   Validates the handshake response from a Cardano node.
   """
   def validate(response) do
-    %{payload: payload} = Util.plex(response)
+    # TODO: handle error
+    {:ok, %{payload: payload}} = Util.plex(response)
 
     case CBOR.decode(payload) do
       # msgAcceptVersion
