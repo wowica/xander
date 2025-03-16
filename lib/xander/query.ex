@@ -13,7 +13,7 @@ defmodule Xander.Query do
   require Logger
 
   @basic_tcp_opts [:binary, active: false, send_timeout: 4_000]
-  @active_n2c_versions [9, 10, 11, 12, 13, 14, 15, 16]
+  @active_n2c_versions [9, 10, 11, 12, 13, 14, 15, 16, 17]
 
   defstruct [:client, :path, :port, :socket, :network, queue: :queue.new()]
 
