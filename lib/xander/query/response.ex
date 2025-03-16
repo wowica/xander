@@ -31,7 +31,8 @@ defmodule Xander.Query.Response do
       {:ok, 42}
 
       # Generic response
-      iex> payload = CBOR.encode([4, "some data"])
+      iex> tag = %CBOR.Tag{tag: :bytes, value: "some data"}
+      iex> payload = CBOR.encode([4, tag])
       iex> binary = Xander.Util.plex_encode(payload)
       iex> Xander.Query.Response.parse_response(binary)
       {:ok, %CBOR.Tag{tag: :bytes, value: "some data"}}

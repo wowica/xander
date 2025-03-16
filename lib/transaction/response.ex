@@ -16,7 +16,8 @@ defmodule Xander.Transaction.Response do
       {:ok, :accepted}
 
       # Transaction rejected with reason
-      iex> binary = Xander.Util.plex_encode(CBOR.encode([2, "invalid tx"]))
+      iex> tag = %CBOR.Tag{tag: :bytes, value: "invalid tx"}
+      iex> binary = Xander.Util.plex_encode(CBOR.encode([2, tag]))
       iex> Xander.Transaction.Response.parse_response(binary)
       {:ok, {:rejected, %CBOR.Tag{tag: :bytes, value: "invalid tx"}}}
 

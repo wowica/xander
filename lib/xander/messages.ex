@@ -155,8 +155,10 @@ defmodule Xander.Messages do
 
   defp build_query(query), do: [@message_query, query]
 
-  defp build_transaction(tx_binary),
-    do: [@message_submit_tx, [@conway_era, %CBOR.Tag{tag: @encoded_cbor_tag, value: tx_binary}]]
+  defp build_transaction(tx_binary) do
+    tag = %CBOR.Tag{tag: :bytes, value: tx_binary}
+    [@message_submit_tx, [@conway_era, %CBOR.Tag{tag: @encoded_cbor_tag, value: tag}]]
+  end
 
   # middle 16 bits are: 1 bit == 0 for initiator and 15 bits for the mini protocol ID
   defp header(mini_protocol_id, payload),

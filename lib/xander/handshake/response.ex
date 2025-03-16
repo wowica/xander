@@ -60,7 +60,8 @@ defmodule Xander.Handshake.Response do
       :unknown_refuse_reason
 
       # Query reply response
-      iex> payload = CBOR.encode([3, %{"supported" => [32783, 32784, 32785]}])
+      iex> tag = %CBOR.Tag{tag: :bytes, value: "supported"}
+      iex> payload = CBOR.encode([3, %{tag => [32783, 32784, 32785]}])
       iex> response = Xander.Util.plex_encode(payload)
       iex> Xander.Handshake.Response.validate(response)
       {:versions, %{%CBOR.Tag{tag: :bytes, value: "supported"} => [32783, 32784, 32785]}}
