@@ -18,7 +18,7 @@ defmodule Xander.Transaction.Response do
       # Transaction rejected with reason
       iex> binary = Xander.Util.plex_encode(CBOR.encode([2, "invalid tx"]))
       iex> Xander.Transaction.Response.parse_response(binary)
-      {:ok, {:rejected, "invalid tx"}}
+      {:ok, {:rejected, %CBOR.Tag{tag: :bytes, value: "invalid tx"}}}
 
       # Disconnected from node
       iex> binary = Xander.Util.plex_encode(CBOR.encode([3]))
