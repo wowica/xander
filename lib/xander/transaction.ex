@@ -14,7 +14,7 @@ defmodule Xander.Transaction do
   @basic_tcp_opts [:binary, active: false, send_timeout: 4_000]
   @active_n2c_versions [9, 10, 11, 12, 13, 14, 15, 16, 17]
 
-  defstruct [:client, :path, :port, :socket, :network, :caller, queue: :queue.new()]
+  defstruct [:client, :path, :port, :socket, :network, queue: :queue.new()]
 
   @typedoc """
   Type defining the Transaction struct.
@@ -25,7 +25,6 @@ defmodule Xander.Transaction do
           port: non_neg_integer() | 0,
           socket: any(),
           network: any(),
-          caller: any(),
           queue: :queue.queue()
         }
 
@@ -136,7 +135,7 @@ defmodule Xander.Transaction do
 
   @doc """
   Emits events when in the `connected` state. Must transition to the
-  `established_has_agency` state prior to sending queries to the node.
+  `idle` state prior to sending queries to the node.
   """
   @spec connected(:info | :internal, :establish | any(), t()) ::
           {:next_state, :disconnected, t()}
@@ -174,33 +173,44 @@ defmodule Xander.Transaction do
     end
   end
 
-  @spec busy(:info | :internal, {:send_tx, binary()} | {:tcp_closed, any()}, t()) ::
+  @spec busy(
+          :info | :internal | {:call, any()},
+          {:request, atom(), atom()} | {:tcp_closed, any()},
+          t()
+        ) ::
           {:next_state, :disconnected, t()}
           | {:next_state, :disconnected | :idle, t(), [{:reply, any(), {:error | :ok, any()}}]}
+          | {:keep_state, t(), [{:next_event, :internal, :send_tx}]}
   def busy(_event_type, _event_content, _data)
 
+  # Handle call from dependent process to send a transaction. The transaction and caller are
+  # added to the queue, and will be processed after the current transaction response is received.
+  def busy(
+        {:call, from},
+        {:request, :send_tx, tx_hash},
+        %__MODULE__{client: _client, socket: _socket} = data
+      ) do
+    # Add the caller and transaction in our queue
+    data = update_in(data.queue, &:queue.in({from, tx_hash}, &1))
+    {:keep_state, data, [{:next_event, :internal, :send_tx}]}
+  end
+
+  # Handle internal event to send a transaction (from idle state)
   def busy(
         :internal,
-        {:send_tx, tx_hex},
-        %__MODULE__{client: client, socket: socket, caller: from} = data
+        :send_tx,
+        %__MODULE__{client: client, socket: socket} = data
       ) do
-    :ok = client.send(socket, Messages.transaction(tx_hex))
+    # Get the current transaction from queue without removing it
+    {:value, {_from, tx_hash}} = :queue.peek(data.queue)
 
-    {next_state, actions} =
-      case client.recv(socket, 0, _timeout = 5_000) do
-        {:ok, tx_response} ->
-          handle_tx_response(tx_response, from)
+    # Set socket to active mode before sending to be ready to receive response
+    :inet.setopts(socket, active: true)
 
-        {:error, reason} ->
-          Logger.error("Failed to send transaction: #{inspect(reason)}")
-          # Reply to caller with error
-          actions = [{:reply, from, {:error, {:send_failed, reason}}}]
+    # Send transaction to node and remain in busy state
+    :ok = client.send(socket, Messages.transaction(tx_hash))
 
-          {:idle, actions}
-      end
-
-    data = Map.delete(data, :caller)
-    {:next_state, next_state, data, actions}
+    {:keep_state, data}
   end
 
   def busy(:info, {:tcp_closed, socket}, %__MODULE__{socket: socket} = data) do
@@ -208,10 +218,21 @@ defmodule Xander.Transaction do
     {:next_state, :disconnected, data}
   end
 
+  # This function is invoked due to the socket being set to active mode.
+  # Handles the response while in busy state.
+  def busy(
+        :info,
+        {_tcp_or_ssl, socket, bytes},
+        %__MODULE__{client: _client, socket: socket} = data
+      ) do
+    handle_response(bytes, socket, data)
+  end
+
   @doc """
   Emits events when in the `idle` state.
   This maps to the StIdle state in the Cardano Local State Query protocol.
-  This is the state where the process waits for a query to be made.
+  This is the state where the process waits for a query to be made and the
+  queue is empty.
   """
   @spec idle(
           :info | :internal | {:call, any()},
@@ -219,51 +240,47 @@ defmodule Xander.Transaction do
           t()
         ) ::
           {:next_state, :disconnected, t()}
-          | {:next_state, :busy, t(), [{:next_event, :internal, {:send_tx, binary()}}]}
+          | {:next_state, :busy, t(), [{:next_event, :internal, :send_tx}]}
   def idle(_event_type, _event_content, _data)
 
+  # Handle call from dependent process to send a transaction
   def idle(
         {:call, from},
         {:request, :send_tx, tx_hash},
         %__MODULE__{client: _client, socket: _socket} = data
       ) do
-    # Store the caller in data and don't reply immediately
-    data = Map.put(data, :caller, from)
+    # Track the caller and transaction in our queue. A queue is kept to handle
+    # transactions that are sent from the dependent process while the current
+    # transaction is being processed.
+    data = update_in(data.queue, &:queue.in({from, tx_hash}, &1))
 
-    {:next_state, :busy, data, [{:next_event, :internal, {:send_tx, tx_hash}}]}
+    {:next_state, :busy, data, [{:next_event, :internal, :send_tx}]}
   end
 
+  # Handle socket closure in idle state
   def idle(:info, {:tcp_closed, socket}, %__MODULE__{socket: socket} = data) do
     Logger.error("Connection closed while in idle")
     {:next_state, :disconnected, data}
   end
 
-  defp handle_tx_response(tx_response, from) do
-    case Response.parse_response(tx_response) do
-      {:ok, :accepted} ->
-        Logger.info("Transaction submitted successfully")
+  # Private helper function to handle transaction responses
+  defp handle_response(bytes, socket, data) do
+    case Response.parse_response(bytes) do
+      {:ok, response} ->
+        process_queue_item(socket, data, {:ok, response})
 
-        actions = [{:reply, from, {:ok, :accepted}}]
-        {:idle, actions}
-
-      {:ok, :disconnected} ->
-        Logger.info(~c"ltMsgDone message received from protocol.")
-
-        actions = [{:reply, from, {:error, {:disconnected, :disconnected}}}]
-        {:disconnected, actions}
-
-      {:ok, {:rejected, failure_reason}} ->
-        Logger.error("Transaction submission failed. Reason: #{inspect(failure_reason)}")
-
-        actions = [{:reply, from, {:error, {:rejected, failure_reason}}}]
-        {:idle, actions}
-
-      {:error, error} ->
-        Logger.error("Failed to decode transaction response: #{inspect(error)}")
-
-        actions = [{:reply, from, {:error, {:decode_failed, error}}}]
-        {:idle, actions}
+      {:error, reason} ->
+        Logger.error("Failed to parse response: #{inspect(reason)}")
+        process_queue_item(socket, data, {:error, :parse_failed})
     end
+  end
+
+  defp process_queue_item(socket, data, result) do
+    {{:value, {caller, _tx_hash}}, new_data} = get_and_update_in(data.queue, &:queue.out/1)
+    :inet.setopts(socket, active: false)
+    actions = [{:reply, caller, result}]
+    next_state = if :queue.is_empty(new_data.queue), do: :idle, else: :busy
+    {:next_state, next_state, new_data, actions}
   end
 
   defp maybe_local_path(path, :socket), do: {:local, path}

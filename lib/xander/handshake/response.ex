@@ -81,8 +81,6 @@ defmodule Xander.Handshake.Response do
     with {:ok, %{payload: payload}} <- Util.plex(response),
          {:ok, decoded} <- decode_cbor(payload) do
       process_decoded_message(decoded)
-    else
-      {:error, reason} -> {:error, reason}
     end
   end
 
