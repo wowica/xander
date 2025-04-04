@@ -183,18 +183,6 @@ defmodule Xander.Transaction do
           | {:keep_state, t(), [{:next_event, :internal, :send_tx}]}
   def busy(_event_type, _event_content, _data)
 
-  # Handle call from dependent process to send a transaction. The transaction and caller are
-  # added to the queue, and will be processed after the current transaction response is received.
-  def busy(
-        {:call, from},
-        {:request, :send_tx, tx_hash},
-        %__MODULE__{client: _client, socket: _socket} = data
-      ) do
-    # Add the caller and transaction in our queue
-    data = update_in(data.queue, &:queue.in({from, tx_hash}, &1))
-    {:keep_state, data, [{:next_event, :internal, :send_tx}]}
-  end
-
   # Handle internal event to send a transaction (from idle state)
   def busy(
         :internal,
