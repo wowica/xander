@@ -213,8 +213,13 @@ defmodule Xander.Transaction do
     {:keep_state, data}
   end
 
-  def busy(:info, {:tcp_closed, socket}, %__MODULE__{socket: socket} = data) do
+  def busy(:info, {:tcp_closed, _socket}, %__MODULE__{socket: _data_socket} = data) do
     Logger.error("Connection closed while in busy")
+    {:next_state, :disconnected, data}
+  end
+
+  def busy(:info, {:tcp_error, _socket, reason}, %__MODULE__{socket: _data_socket} = data) do
+    Logger.error("Connection error while in busy: #{inspect(reason)}")
     {:next_state, :disconnected, data}
   end
 
@@ -225,7 +230,14 @@ defmodule Xander.Transaction do
         {_tcp_or_ssl, _socket, bytes},
         %__MODULE__{} = data
       ) do
-    handle_response(bytes, data)
+    case Response.parse_response(bytes) do
+      {:ok, response} ->
+        process_queue_item(data, {:ok, response})
+
+      {:error, reason} ->
+        Logger.error("Failed to parse response: #{inspect(reason)}")
+        process_queue_item(data, {:error, :parse_failed})
+    end
   end
 
   @doc """
@@ -261,18 +273,6 @@ defmodule Xander.Transaction do
   def idle(:info, {:tcp_closed, socket}, %__MODULE__{socket: socket} = data) do
     Logger.error("Connection closed while in idle")
     {:next_state, :disconnected, data}
-  end
-
-  # Private helper function to handle transaction responses
-  defp handle_response(bytes, data) do
-    case Response.parse_response(bytes) do
-      {:ok, response} ->
-        process_queue_item(data, {:ok, response})
-
-      {:error, reason} ->
-        Logger.error("Failed to parse response: #{inspect(reason)}")
-        process_queue_item(data, {:error, :parse_failed})
-    end
   end
 
   defp process_queue_item(data, result) do
