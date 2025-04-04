@@ -19,7 +19,7 @@ defmodule Xander.Transaction.Response do
       iex> tag = %CBOR.Tag{tag: :bytes, value: "invalid tx"}
       iex> binary = Xander.Util.plex_encode(CBOR.encode([2, tag]))
       iex> Xander.Transaction.Response.parse_response(binary)
-      {:error, {:rejected, %CBOR.Tag{tag: :bytes, value: "invalid tx"}}}
+      {:rejected, %CBOR.Tag{tag: :bytes, value: "invalid tx"}}
 
       # Disconnected from node
       iex> binary = Xander.Util.plex_encode(CBOR.encode([3]))
@@ -41,8 +41,8 @@ defmodule Xander.Transaction.Response do
            | :cbor_match_error
            | :invalid_format
            | :invalid_input
-           | :disconnected
-           | {:rejected, any()}}
+           | :disconnected}
+          | {:rejected, any()}
           | {:ok, :accepted}
   def parse_response(cbor_response) do
     case Xander.Util.plex(cbor_response) do
@@ -60,7 +60,7 @@ defmodule Xander.Transaction.Response do
         {:ok, :accepted}
 
       {:ok, [2, failure_reason], <<>>} ->
-        {:error, {:rejected, failure_reason}}
+        {:rejected, failure_reason}
 
       {:ok, [3], <<>>} ->
         {:error, :disconnected}

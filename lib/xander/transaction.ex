@@ -222,6 +222,9 @@ defmodule Xander.Transaction do
       {:ok, response} ->
         process_queue_item(data, {:ok, response})
 
+      {:rejected, reason} ->
+        process_queue_item(data, {:rejected, reason})
+
       {:error, reason} ->
         Logger.error("Failed to parse response: #{inspect(reason)}")
         process_queue_item(data, {:error, :parse_failed})
