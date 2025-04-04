@@ -22,6 +22,15 @@ defmodule Xander.Messages do
   @message_acquire [8]
   @message_release [5]
 
+  # See the CDDL for details on mapping of messages to numbers.
+  # https://github.com/IntersectMBO/ouroboros-network/blob/main/ouroboros-network-protocols/cddl/specs/local-tx-submission.cddl
+  @message_submit_tx 0
+  @conway_era 6
+  # Tag number 24 (CBOR data item) can be used to tag the embedded
+  # byte string as a single data item encoded in CBOR format.
+  # https://datatracker.ietf.org/doc/html/rfc8949#embedded-di
+  @encoded_cbor_tag 24
+
   @doc """
   Acquires a snapshot of the mempool, allowing the protocol to make queries.
 
@@ -133,7 +142,23 @@ defmodule Xander.Messages do
     header(@mini_protocols.local_state_query, bitstring_payload) <> bitstring_payload
   end
 
+  @spec transaction(binary()) :: binary()
+  def transaction(tx_hex) do
+    bitstring_payload =
+      tx_hex
+      |> Base.decode16!(case: :mixed)
+      |> build_transaction()
+      |> CBOR.encode()
+
+    header(@mini_protocols.local_tx_submission, bitstring_payload) <> bitstring_payload
+  end
+
   defp build_query(query), do: [@message_query, query]
+
+  defp build_transaction(tx_binary) do
+    tag = %CBOR.Tag{tag: :bytes, value: tx_binary}
+    [@message_submit_tx, [@conway_era, %CBOR.Tag{tag: @encoded_cbor_tag, value: tag}]]
+  end
 
   # middle 16 bits are: 1 bit == 0 for initiator and 15 bits for the mini protocol ID
   defp header(mini_protocol_id, payload),
