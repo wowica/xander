@@ -205,7 +205,7 @@ defmodule Xander.Transaction do
     {:value, {_from, tx_hash}} = :queue.peek(data.queue)
 
     # Set socket to active mode before sending to be ready to receive response
-    :inet.setopts(socket, active: true)
+    :inet.setopts(socket, active: :once)
 
     # Send transaction to node and remain in busy state
     :ok = client.send(socket, Messages.transaction(tx_hash))
@@ -222,10 +222,10 @@ defmodule Xander.Transaction do
   # Handles the response while in busy state.
   def busy(
         :info,
-        {_tcp_or_ssl, socket, bytes},
-        %__MODULE__{client: _client, socket: socket} = data
+        {_tcp_or_ssl, _socket, bytes},
+        %__MODULE__{} = data
       ) do
-    handle_response(bytes, socket, data)
+    handle_response(bytes, data)
   end
 
   @doc """
@@ -264,20 +264,19 @@ defmodule Xander.Transaction do
   end
 
   # Private helper function to handle transaction responses
-  defp handle_response(bytes, socket, data) do
+  defp handle_response(bytes, data) do
     case Response.parse_response(bytes) do
       {:ok, response} ->
-        process_queue_item(socket, data, {:ok, response})
+        process_queue_item(data, {:ok, response})
 
       {:error, reason} ->
         Logger.error("Failed to parse response: #{inspect(reason)}")
-        process_queue_item(socket, data, {:error, :parse_failed})
+        process_queue_item(data, {:error, :parse_failed})
     end
   end
 
-  defp process_queue_item(socket, data, result) do
+  defp process_queue_item(data, result) do
     {{:value, {caller, _tx_hash}}, new_data} = get_and_update_in(data.queue, &:queue.out/1)
-    :inet.setopts(socket, active: false)
     actions = [{:reply, caller, result}]
     next_state = if :queue.is_empty(new_data.queue), do: :idle, else: :busy
     {:next_state, next_state, new_data, actions}
