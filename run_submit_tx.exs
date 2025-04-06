@@ -23,8 +23,10 @@ case Transaction.start_link(config) do
 
     tx_hex = ""
 
-    tx_hash = Transaction.send(pid, tx_hex)
-    IO.puts("Transaction submitted with hash: #{tx_hash}")
+    case Transaction.send(pid, tx_hex) do
+      {:ok, :accepted} -> IO.puts("Transaction submitted successfully")
+      _ -> IO.puts("Error submitting transaction")
+    end
 
   {:error, reason} ->
     IO.puts("Failed to connect to Cardano node: #{inspect(reason)}")
