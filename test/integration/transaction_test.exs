@@ -7,15 +7,23 @@ defmodule Xander.Integration.TransactionTest do
   @mnemonic "test test test test test test test test test test test test test test test test test test test test test test test sauce"
 
   @address0 "addr_test1qryvgass5dsrf2kxl3vgfz76uhp83kv5lagzcp29tcana68ca5aqa6swlq6llfamln09tal7n5kvt4275ckwedpt4v7q48uhex"
+  @payment_key0 "ed25519e_sk1sqr5ymxr5377q2tww7qzj8wdf9uwsx530p6txpfktvdsjvh2t3dk3q27c7gkel6anmfy4a2g6txy0f4mquwmj3pppvy3046006ulussa20jpu"
+  @staking_key0 "ed25519e_sk12rgp4ssmuwe6tgsqwhf255dyj99vwfezsltnx2zg9ptwxvl2t3dumf06jg0rgyw0evktn24y9kshw8jtch3d6h2ppswtswywaa633vq34g6r4"
   @utxo0 "6d36c0e2f304a5c27b85b3f04e95fc015566d35aef5f061c17c70e3e8b9ee508#0"
 
   @address1 "addr_test1qpqy3lufef8c3en9nrnzp2svwy5vy9zangvp46dy4qw23clgfxhn3pqv243d6wptud7fuaj5tjqer7wc7m036gx0emsqaqa8te"
+  @payment_key1 "ed25519e_sk1sz7phkd0edt8rwydm5eyr2j5yytg6yuuakz9azvwxjhju0l2t3djjk0lsq376exusamclxnu2lkp3qmajuyyrtp4n5k7xeaeyjl52jq8r4xyr"
+  @staking_key1 "ed25519e_sk10p46hyz6h34lr5d6l0x89hrlhenj7lf9cha7ln8a6697jwh2t3dhgkz0lcr896rv773mupcc239vcs06uet0a44yqsrzdlx69wwy8tswkp56t"
   @utxo1 "dc0d0d0a13e683e443c575147ec12136e5ac6a4f994cd4189d4d25bed541c44d#0"
 
   @address2 "addr_test1qr9xuxclxgx4gw3y4h4tcz4yvfmrt3e5nd3elphhf00a67xnrv5vjcv6tzehj2nnjj4cth4ndzyuf4asvvkgzeac2hfqk0za93"
+  @payment_key2 "ed25519e_sk1gqv3vkxkcg0pwqm6v9uw7g79z7mm8cn4j5xxwms60cuuuw82t3dcjn8pzsc26wn5sl93mzk3hex8uy4syf9e6xhqxp67cyz3mnka4uc0r9as0"
+  @staking_key2 "ed25519e_sk12qd8w9g5342kp8wpv8h3d53c40j8sgmge82m49kdlrhw5s82t3d5y4xwr4rdxyxj66heh7c7788npmvnlexqd7a6dxvz6amq4hxz2sgteyf6g"
   @utxo2 "aae852d5d2b08c0a937a319fec0d9933bc3bc67b9d0a6bfd4001997b169364b3#0"
 
   @address3 "addr_test1qqra0q073cecs03hr724psh3ppejrlpjuphgpdj7xjwvkqnhqttgsr5xuaaq2g805dldu3gq9gw7gwmgdyhpwkm59ensgyph06"
+  @payment_key3 "ed25519e_sk1spvy8qz8fdnqadfpvvkyyxt7gacxql644vf2dluj8lees0h2t3dean3h530f97ek3l4prclpy6qxcutzupym6rv9nxmwr733ea8j4gcl3haehI'"
+  @staking_key3 "ed25519e_sk15zd6l7z66zhmuxlw9mgt4wg9wqrx0lt058whnvsz9yqe2w02t3dh423fmrmtt4ru0d2yvudk993x8v0x6j308ev89w9prgp3cu7q60s40s8h4"
   @utxo3 "145da89c02380f6f72d6acc8194cd9295eb2001c2d88f0b20fef647ec5a18f7f#0"
 
   # Helper function to run cardano-cli commands with better error handling
@@ -43,8 +51,10 @@ defmodule Xander.Integration.TransactionTest do
   # Helper function to get the socket path
   defp get_socket_path do
     # Use the Yaci DevKit socket path
-    # Yaci DevKit typically uses this path for its socket
-    System.get_env("CARDANO_NODE_SOCKET_PATH", "/tmp/cardano_node.socket")
+    System.get_env(
+      "CARDANO_NODE_SOCKET_PATH",
+      "#{System.get_env("HOME")}/.yaci-cli/local-clusters/default/node/node.sock"
+    )
   end
 
   # Helper function to run cardano-cli address commands
@@ -77,6 +87,18 @@ defmodule Xander.Integration.TransactionTest do
     keys_dir = Path.join(tx_dir, "keys")
     File.mkdir_p!(keys_dir)
 
+    # Create key files using the predefined keys from account0
+    # payment_vkey = Path.join(keys_dir, "payment.vkey")
+    payment_skey = Path.join(keys_dir, "payment.skey")
+    # stake_vkey = Path.join(keys_dir, "stake.vkey")
+    # stake_skey = Path.join(keys_dir, "stake.skey")
+
+    # Write the predefined keys to files
+    # File.write!(payment_vkey, @payment_key0)
+    File.write!(payment_skey, @payment_key0)
+    # File.write!(stake_vkey, @staking_key0)
+    # File.write!(stake_skey, @staking_key0)
+
     # Check if the socket exists and is accessible
     socket_path = get_socket_path()
     IO.puts("Checking socket at path: #{socket_path}")
@@ -85,66 +107,13 @@ defmodule Xander.Integration.TransactionTest do
       :gen_tcp.connect({:local, to_charlist(socket_path)}, 0, [:binary, active: false])
 
     :gen_tcp.close(socket)
-
-    # Create dummy files for our test
-    # Note: We'll create these regardless of socket status, as the test will skip commands if needed
-    dummy_payment_vkey = Path.join(keys_dir, "payment.vkey")
-    dummy_payment_skey = Path.join(keys_dir, "payment.skey")
-    dummy_stake_vkey = Path.join(keys_dir, "stake.vkey")
-    dummy_stake_skey = Path.join(keys_dir, "stake.skey")
-
-    # Generate payment key pair if cli is available, otherwise create dummy files
-    payment_key_gen_result =
-      run_cardano_cli([
-        "address",
-        "key-gen",
-        "--verification-key-file",
-        dummy_payment_vkey,
-        "--signing-key-file",
-        dummy_payment_skey
-      ])
-
-    IO.puts("Payment key generation: #{inspect(payment_key_gen_result)}")
-
-    # Generate stake key pair if cli is available, otherwise create dummy files
-    stake_key_gen_result =
-      run_cardano_cli([
-        "stake-address",
-        "key-gen",
-        "--verification-key-file",
-        dummy_stake_vkey,
-        "--signing-key-file",
-        dummy_stake_skey
-      ])
-
-    IO.puts("Stake key generation: #{inspect(stake_key_gen_result)}")
+    IO.puts("Socket is accessible")
 
     # Build a dummy payment address
     dummy_address = Path.join(tx_dir, "payment.addr")
 
-    address_result =
-      run_cardano_cli([
-        "address",
-        "build",
-        "--payment-verification-key-file",
-        dummy_payment_vkey,
-        "--stake-verification-key-file",
-        dummy_stake_vkey,
-        "--testnet-magic",
-        "2",
-        "--out-file",
-        dummy_address
-      ])
-
-    IO.puts("Address build: #{inspect(address_result)}")
-
-    # Read the address from the file
-    address =
-      case File.read(dummy_address) do
-        {:ok, addr} -> String.trim(addr)
-        # Fallback to default test address
-        _ -> @address0
-      end
+    # Use the predefined address from account0
+    address = @address0
 
     on_exit(fn ->
       File.rm_rf!(tx_dir)
@@ -172,7 +141,7 @@ defmodule Xander.Integration.TransactionTest do
            "query",
            "protocol-parameters",
            "--testnet-magic",
-           "2",
+           "42",
            "--socket-path",
            socket_path,
            "--out-file",
@@ -198,7 +167,7 @@ defmodule Xander.Integration.TransactionTest do
            "transaction",
            "build",
            "--testnet-magic",
-           "2",
+           "42",
            "--socket-path",
            socket_path,
            "--tx-in",
@@ -224,7 +193,7 @@ defmodule Xander.Integration.TransactionTest do
            "transaction",
            "sign",
            "--testnet-magic",
-           "2",
+           "42",
            "--tx-body-file",
            tx_out,
            "--signing-key-file",
@@ -246,7 +215,7 @@ defmodule Xander.Integration.TransactionTest do
            "transaction",
            "submit",
            "--testnet-magic",
-           "2",
+           "42",
            "--socket-path",
            socket_path,
            "--tx-file",
