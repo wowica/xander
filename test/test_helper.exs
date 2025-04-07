@@ -1,3 +1,3 @@
-Application.stop(:xander)
+Logger.configure(level: :error)
 
 ExUnit.start()
