@@ -77,25 +77,6 @@ defmodule Xander.Integration.TransactionTest do
     keys_dir = Path.join(tx_dir, "keys")
     File.mkdir_p!(keys_dir)
 
-    # Check if cardano-cli is available
-    cardano_cli_available =
-      case System.cmd("which", ["cardano-cli"], stderr_to_stdout: true) do
-        {_, 0} -> true
-        _ -> false
-      end
-
-    if cardano_cli_available do
-      IO.puts("cardano-cli is available")
-      # Check cardano-cli version
-      case System.cmd("cardano-cli", ["--version"], stderr_to_stdout: true) do
-        {version, 0} -> IO.puts("cardano-cli version: #{version}")
-        _ -> IO.puts("Could not determine cardano-cli version")
-      end
-    else
-      IO.puts("WARNING: cardano-cli is not available in PATH")
-      IO.puts("PATH: #{System.get_env("PATH")}")
-    end
-
     # Check if the socket exists and is accessible
     socket_path = get_socket_path()
     IO.puts("Checking socket at path: #{socket_path}")
@@ -114,57 +95,27 @@ defmodule Xander.Integration.TransactionTest do
 
     # Generate payment key pair if cli is available, otherwise create dummy files
     payment_key_gen_result =
-      if cardano_cli_available do
-        run_cardano_cli([
-          "address",
-          "key-gen",
-          "--verification-key-file",
-          dummy_payment_vkey,
-          "--signing-key-file",
-          dummy_payment_skey
-        ])
-      else
-        # Create dummy files
-        File.write!(
-          dummy_payment_vkey,
-          "{\"type\": \"PaymentVerificationKeyShelley_ed25519\", \"description\": \"Payment Verification Key\", \"cborHex\": \"5820e394d78d5bc81ff6d250b652d9ca46b568c35e53291ef3e53608b44d88a54ac\"}"
-        )
-
-        File.write!(
-          dummy_payment_skey,
-          "{\"type\": \"PaymentSigningKeyShelley_ed25519\", \"description\": \"Payment Signing Key\", \"cborHex\": \"5820f16387d5d45197ebee3586fb3129d7a1b05d5ef8fc7cfb43601fd967e0b3a67\"}"
-        )
-
-        {:ok, "Created dummy payment keys"}
-      end
+      run_cardano_cli([
+        "address",
+        "key-gen",
+        "--verification-key-file",
+        dummy_payment_vkey,
+        "--signing-key-file",
+        dummy_payment_skey
+      ])
 
     IO.puts("Payment key generation: #{inspect(payment_key_gen_result)}")
 
     # Generate stake key pair if cli is available, otherwise create dummy files
     stake_key_gen_result =
-      if cardano_cli_available do
-        run_cardano_cli([
-          "stake-address",
-          "key-gen",
-          "--verification-key-file",
-          dummy_stake_vkey,
-          "--signing-key-file",
-          dummy_stake_skey
-        ])
-      else
-        # Create dummy files
-        File.write!(
-          dummy_stake_vkey,
-          "{\"type\": \"StakeVerificationKeyShelley_ed25519\", \"description\": \"Stake Verification Key\", \"cborHex\": \"5820e3c6d09fe1c5f5a3eeb4c575a0e5c46ce3f5d9b113a22f6cec799c10ea63457\"}"
-        )
-
-        File.write!(
-          dummy_stake_skey,
-          "{\"type\": \"StakeSigningKeyShelley_ed25519\", \"description\": \"Stake Signing Key\", \"cborHex\": \"5820f16387d5d45197ebee3586fb3129d7a1b05d5ef8fc7cfb43601fd967e0b3a67\"}"
-        )
-
-        {:ok, "Created dummy stake keys"}
-      end
+      run_cardano_cli([
+        "stake-address",
+        "key-gen",
+        "--verification-key-file",
+        dummy_stake_vkey,
+        "--signing-key-file",
+        dummy_stake_skey
+      ])
 
     IO.puts("Stake key generation: #{inspect(stake_key_gen_result)}")
 
@@ -172,24 +123,18 @@ defmodule Xander.Integration.TransactionTest do
     dummy_address = Path.join(tx_dir, "payment.addr")
 
     address_result =
-      if cardano_cli_available do
-        run_cardano_cli([
-          "address",
-          "build",
-          "--payment-verification-key-file",
-          dummy_payment_vkey,
-          "--stake-verification-key-file",
-          dummy_stake_vkey,
-          "--testnet-magic",
-          "2",
-          "--out-file",
-          dummy_address
-        ])
-      else
-        # Create a dummy address file
-        File.write!(dummy_address, @address0)
-        {:ok, "Created dummy address file"}
-      end
+      run_cardano_cli([
+        "address",
+        "build",
+        "--payment-verification-key-file",
+        dummy_payment_vkey,
+        "--stake-verification-key-file",
+        dummy_stake_vkey,
+        "--testnet-magic",
+        "2",
+        "--out-file",
+        dummy_address
+      ])
 
     IO.puts("Address build: #{inspect(address_result)}")
 
@@ -208,8 +153,7 @@ defmodule Xander.Integration.TransactionTest do
     %{
       tx_dir: tx_dir,
       keys_dir: keys_dir,
-      address: address,
-      cardano_cli_available: cardano_cli_available
+      address: address
     }
   end
 
@@ -217,38 +161,30 @@ defmodule Xander.Integration.TransactionTest do
   test "can perform basic transactions to transfer ADA", %{
     tx_dir: tx_dir,
     keys_dir: keys_dir,
-    address: address,
-    cardano_cli_available: cardano_cli_available
+    address: address
   } do
     # Set up network parameters
     protocol_params = Path.join(tx_dir, "protocol-params.json")
     socket_path = get_socket_path()
 
-    dbg(cardano_cli_available)
-
     # Get protocol parameters
-    if cardano_cli_available do
-      case run_cardano_cli([
-             "query",
-             "protocol-parameters",
-             "--testnet-magic",
-             "2",
-             "--socket-path",
-             socket_path,
-             "--out-file",
-             protocol_params
-           ]) do
-        {:ok, _output} ->
-          IO.puts("Successfully retrieved protocol parameters")
+    case run_cardano_cli([
+           "query",
+           "protocol-parameters",
+           "--testnet-magic",
+           "2",
+           "--socket-path",
+           socket_path,
+           "--out-file",
+           protocol_params
+         ]) do
+      {:ok, _output} ->
+        IO.puts("Successfully retrieved protocol parameters")
 
-        {:error, error} ->
-          IO.puts("Failed to retrieve protocol parameters: #{error}")
-          # Create a dummy protocol parameters file
-          File.write!(protocol_params, "{}")
-      end
-    else
-      IO.puts("Skipping node query, creating dummy protocol parameters file")
-      File.write!(protocol_params, "{}")
+      {:error, error} ->
+        IO.puts("Failed to retrieve protocol parameters: #{error}")
+        # Create a dummy protocol parameters file
+        File.write!(protocol_params, "{}")
     end
 
     # Create a transaction
@@ -284,30 +220,25 @@ defmodule Xander.Integration.TransactionTest do
     end
 
     # Sign the transaction
-    if cardano_cli_available do
-      case run_cardano_cli([
-             "transaction",
-             "sign",
-             "--testnet-magic",
-             "2",
-             "--tx-body-file",
-             tx_out,
-             "--signing-key-file",
-             Path.join(keys_dir, "payment.skey"),
-             "--out-file",
-             tx_signed
-           ]) do
-        {:ok, _output} ->
-          IO.puts("Successfully signed transaction")
+    case run_cardano_cli([
+           "transaction",
+           "sign",
+           "--testnet-magic",
+           "2",
+           "--tx-body-file",
+           tx_out,
+           "--signing-key-file",
+           Path.join(keys_dir, "payment.skey"),
+           "--out-file",
+           tx_signed
+         ]) do
+      {:ok, _output} ->
+        IO.puts("Successfully signed transaction")
 
-        {:error, error} ->
-          IO.puts("Failed to sign transaction: #{error}")
-          # Create a dummy signed transaction file
-          File.write!(tx_signed, "{}")
-      end
-    else
-      IO.puts("Skipping transaction signing, creating dummy signed transaction file")
-      File.write!(tx_signed, "{}")
+      {:error, error} ->
+        IO.puts("Failed to sign transaction: #{error}")
+        # Create a dummy signed transaction file
+        File.write!(tx_signed, "{}")
     end
 
     # Submit the transaction
