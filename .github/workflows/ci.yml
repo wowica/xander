@@ -322,16 +322,17 @@ jobs:
           # Wait for the Cardano node socket to be available
           for i in {1..60}; do
             # Extract the socket path from the Yaci DevKit logs
-            YACI_SOCKET_PATH=$(grep -o "/root/.yaci-cli/local-clusters/default/node/node.sock" yaci-devkit.log || echo "")
+            YACI_SOCKET_PATH=$(grep -o "$HOME/.yaci-cli/local-clusters/default/node/node.sock" yaci-devkit.log || echo "")
             
             if [ -z "$YACI_SOCKET_PATH" ]; then
               echo "Could not find socket path in Yaci DevKit logs. Using default path."
-              YACI_SOCKET_PATH="/root/.yaci-cli/local-clusters/default/node/node.sock"
+              YACI_SOCKET_PATH="$HOME/.yaci-cli/local-clusters/default/node/node.sock"
             fi
             
             # Check if the socket file exists
             if [ -S "$YACI_SOCKET_PATH" ]; then
               echo "Yaci DevKit Cardano node socket is up!"
+              echo "CARDANO_NODE_SOCKET_PATH=$YACI_SOCKET_PATH" >> $GITHUB_ENV
               exit 0
             fi
             echo "Waiting for Yaci DevKit Cardano node socket to start... (attempt $i/60)"
@@ -341,46 +342,7 @@ jobs:
           echo "Yaci DevKit failed to start. Log contents:"
           cat yaci-devkit.log
           exit 1
-          
-      - name: Create socket tunnel to Yaci DevKit
-        run: |
-          # Create the socket directory if it doesn't exist
-          sudo mkdir -p /tmp
-          sudo chmod 777 /tmp
-          
-          # Extract the socket path from the Yaci DevKit logs
-          YACI_SOCKET_PATH=$(grep -o "/root/.yaci-cli/local-clusters/default/node/node.sock" yaci-devkit.log || echo "")
-          
-          if [ -z "$YACI_SOCKET_PATH" ]; then
-            echo "Could not find socket path in Yaci DevKit logs. Using default path."
-            YACI_SOCKET_PATH="/root/.yaci-cli/local-clusters/default/node/node.sock"
-          fi
-          
-          echo "Using Yaci DevKit socket path: $YACI_SOCKET_PATH"
-          
-          # Kill any existing socat processes
-          pkill -f socat || true
-          
-          # Start socat in the background to create a tunnel from the Unix socket to the local socket
-          nohup socat UNIX-LISTEN:/tmp/cardano_node.socket,reuseaddr,fork UNIX-CONNECT:$YACI_SOCKET_PATH > socat.log 2>&1 &
-          
-          # Save the process ID
-          echo $! > socat.pid
-          
-          # Wait for the socket to be created
-          for i in {1..20}; do
-            if [ -S /tmp/cardano_node.socket ]; then
-              echo "Socket tunnel created successfully"
-              exit 0
-            fi
-            echo "Waiting for socket tunnel to be created... (attempt $i/20)"
-            sleep 2
-          done
-          
-          echo "Failed to create socket tunnel. Socat log:"
-          cat socat.log
-          exit 1
-  
+
       - name: Set up Elixir
         uses: erlef/setup-beam@v1
         with:
@@ -401,4 +363,4 @@ jobs:
       - name: Run integration tests
         run: mix test --include integration
         env:
-          CARDANO_NODE_SOCKET_PATH: /tmp/cardano_node.socket
+          CARDANO_NODE_SOCKET_PATH: ${{ env.CARDANO_NODE_SOCKET_PATH }}

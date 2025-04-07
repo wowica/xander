@@ -98,24 +98,12 @@ defmodule Xander.Integration.TransactionTest do
 
     # Check if the socket exists and is accessible
     socket_path = get_socket_path()
-    socket_exists = File.exists?(socket_path) and File.regular?(socket_path) == false
+    IO.puts("Checking socket at path: #{socket_path}")
 
-    # Try netcat to test if socket is working
-    socket_works =
-      if socket_exists do
-        {_, socket_test_status} =
-          System.cmd("sh", ["-c", "echo '' | nc -U #{socket_path} || true"],
-            stderr_to_stdout: true
-          )
+    {:ok, socket} =
+      :gen_tcp.connect({:local, to_charlist(socket_path)}, 0, [:binary, active: false])
 
-        socket_test_status == 0
-      else
-        false
-      end
-
-    IO.puts("Socket path: #{socket_path}")
-    IO.puts("Socket exists: #{socket_exists}")
-    IO.puts("Socket seems to be working: #{socket_works}")
+    :gen_tcp.close(socket)
 
     # Create dummy files for our test
     # Note: We'll create these regardless of socket status, as the test will skip commands if needed
@@ -126,7 +114,7 @@ defmodule Xander.Integration.TransactionTest do
 
     # Generate payment key pair if cli is available, otherwise create dummy files
     payment_key_gen_result =
-      if cardano_cli_available and socket_exists do
+      if cardano_cli_available do
         run_cardano_cli([
           "address",
           "key-gen",
@@ -154,7 +142,7 @@ defmodule Xander.Integration.TransactionTest do
 
     # Generate stake key pair if cli is available, otherwise create dummy files
     stake_key_gen_result =
-      if cardano_cli_available and socket_exists do
+      if cardano_cli_available do
         run_cardano_cli([
           "stake-address",
           "key-gen",
@@ -184,7 +172,7 @@ defmodule Xander.Integration.TransactionTest do
     dummy_address = Path.join(tx_dir, "payment.addr")
 
     address_result =
-      if cardano_cli_available and socket_exists do
+      if cardano_cli_available do
         run_cardano_cli([
           "address",
           "build",
@@ -221,8 +209,6 @@ defmodule Xander.Integration.TransactionTest do
       tx_dir: tx_dir,
       keys_dir: keys_dir,
       address: address,
-      socket_exists: socket_exists,
-      socket_works: socket_works,
       cardano_cli_available: cardano_cli_available
     }
   end
@@ -232,24 +218,16 @@ defmodule Xander.Integration.TransactionTest do
     tx_dir: tx_dir,
     keys_dir: keys_dir,
     address: address,
-    socket_exists: socket_exists,
-    socket_works: socket_works,
     cardano_cli_available: cardano_cli_available
   } do
     # Set up network parameters
     protocol_params = Path.join(tx_dir, "protocol-params.json")
     socket_path = get_socket_path()
 
-    # Check if we can run node-dependent commands
-    can_run_node_commands = cardano_cli_available and socket_exists and socket_works
-
-    dbg(can_run_node_commands)
     dbg(cardano_cli_available)
-    dbg(socket_exists)
-    dbg(socket_works)
 
     # Get protocol parameters
-    if can_run_node_commands do
+    if cardano_cli_available do
       case run_cardano_cli([
              "query",
              "protocol-parameters",
@@ -279,34 +257,30 @@ defmodule Xander.Integration.TransactionTest do
 
     # Build the transaction
     # Transfer 1000000 lovelace (1 ADA) from our generated address to address1
-    if can_run_node_commands do
-      case run_cardano_cli([
-             "transaction",
-             "build",
-             "--testnet-magic",
-             "2",
-             "--socket-path",
-             socket_path,
-             "--tx-in",
-             @utxo0,
-             "--tx-out",
-             "#{@address1}+1000000",
-             "--change-address",
-             address,
-             "--out-file",
-             tx_out
-           ]) do
-        {:ok, _output} ->
-          IO.puts("Successfully built transaction")
 
-        {:error, error} ->
-          IO.puts("Failed to build transaction: #{error}")
-          # Create a dummy transaction file
-          File.write!(tx_out, "{}")
-      end
-    else
-      IO.puts("Skipping transaction build, creating dummy transaction file")
-      File.write!(tx_out, "{}")
+    case run_cardano_cli([
+           "transaction",
+           "build",
+           "--testnet-magic",
+           "2",
+           "--socket-path",
+           socket_path,
+           "--tx-in",
+           @utxo0,
+           "--tx-out",
+           "#{@address1}+1000000",
+           "--change-address",
+           address,
+           "--out-file",
+           tx_out
+         ]) do
+      {:ok, _output} ->
+        IO.puts("Successfully built transaction")
+
+      {:error, error} ->
+        IO.puts("Failed to build transaction: #{error}")
+        # Create a dummy transaction file
+        File.write!(tx_out, "{}")
     end
 
     # Sign the transaction
@@ -337,31 +311,25 @@ defmodule Xander.Integration.TransactionTest do
     end
 
     # Submit the transaction
-    if can_run_node_commands do
-      case run_cardano_cli([
-             "transaction",
-             "submit",
-             "--testnet-magic",
-             "2",
-             "--socket-path",
-             socket_path,
-             "--tx-file",
-             tx_signed
-           ]) do
-        {:ok, output} ->
-          IO.puts("Successfully submitted transaction")
-          assert output =~ "Transaction successfully submitted"
+    case run_cardano_cli([
+           "transaction",
+           "submit",
+           "--testnet-magic",
+           "2",
+           "--socket-path",
+           socket_path,
+           "--tx-file",
+           tx_signed
+         ]) do
+      {:ok, output} ->
+        IO.puts("Successfully submitted transaction")
+        assert output =~ "Transaction successfully submitted"
 
-        {:error, error} ->
-          IO.puts("Failed to submit transaction: #{error}")
-          # In CI, we'll just pass the test since we can't actually submit transactions
-          IO.puts("Skipping actual transaction submission check in CI environment")
-          assert true
-      end
-    else
-      IO.puts("Skipping transaction submission due to socket/CLI unavailability")
-      # Test passes regardless
-      assert true
+      {:error, error} ->
+        IO.puts("Failed to submit transaction: #{error}")
+        # In CI, we'll just pass the test since we can't actually submit transactions
+        IO.puts("Skipping actual transaction submission check in CI environment")
+        assert true
     end
   end
 
