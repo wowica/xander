@@ -36,19 +36,63 @@ jobs:
         run: npm install -g @bloxbean/yaci-devkit
 
       - name: Start Yaci DevKit in background
-        run: nohup  yaci-devkit up --enable-yaci-store &
+        run: |
+          # Kill any existing Yaci DevKit processes
+          pkill -f yaci-devkit || true
+          
+          # Start Yaci DevKit with verbose output
+          nohup yaci-devkit up --enable-yaci-store > yaci-devkit.log 2>&1 &
+          
+          # Save the process ID
+          echo $! > yaci-devkit.pid
+          
+          # Display the log file for debugging
+          tail -f yaci-devkit.log &
+          TAIL_PID=$!
+          
+          # Wait for the log to show that Yaci DevKit is starting
+          for i in {1..10}; do
+            if grep -q "Starting Yaci DevKit" yaci-devkit.log; then
+              echo "Yaci DevKit is starting..."
+              break
+            fi
+            echo "Waiting for Yaci DevKit to start in logs..."
+            sleep 2
+          done
+          
+          # Kill the tail process
+          kill $TAIL_PID || true
 
       - name: Wait for Yaci DevKit to start
         run: |
-          for i in {1..30}; do
-            if nc -z localhost 8080; then
-              echo "Yaci DevKit is up!"
+          # Check if the process is still running
+          if ! ps -p $(cat yaci-devkit.pid) > /dev/null; then
+            echo "Yaci DevKit process died. Log contents:"
+            cat yaci-devkit.log
+            exit 1
+          fi
+          
+          # Wait for the Cardano node socket to be available
+          for i in {1..60}; do
+            # Extract the socket path from the Yaci DevKit logs
+            YACI_SOCKET_PATH=$(grep -o "/root/.yaci-cli/local-clusters/default/node/node.sock" yaci-devkit.log || echo "")
+            
+            if [ -z "$YACI_SOCKET_PATH" ]; then
+              echo "Could not find socket path in Yaci DevKit logs. Using default path."
+              YACI_SOCKET_PATH="/root/.yaci-cli/local-clusters/default/node/node.sock"
+            fi
+            
+            # Check if the socket file exists
+            if [ -S "$YACI_SOCKET_PATH" ]; then
+              echo "Yaci DevKit Cardano node socket is up!"
               exit 0
             fi
-            echo "Waiting for Yaci DevKit to start..."
+            echo "Waiting for Yaci DevKit Cardano node socket to start... (attempt $i/60)"
             sleep 5
           done
-          echo "Yaci DevKit failed to start" >&2
+          
+          echo "Yaci DevKit failed to start. Log contents:"
+          cat yaci-devkit.log
           exit 1
 
       - name: Cache Cardano CLI
@@ -147,7 +191,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y netcat-openbsd libssl-dev
+          sudo apt-get install -y netcat-openbsd libssl-dev socat
           
           # Download and install libssl1.1 manually
           wget http://archive.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2_amd64.deb
@@ -162,7 +206,7 @@ jobs:
             ~/.cache/cardano-cli
             /usr/local/bin/cardano-cli
             /usr/local/bin/cardano-node
-          key: ${{ runner.os }}-cardano-cli-8.7.3
+          key: ${{ runner.os }}-cardano-cli-10.2.1
           restore-keys: |
             ${{ runner.os }}-cardano-cli-
 
@@ -177,13 +221,13 @@ jobs:
           mkdir -p ~/.cache/cardano-cli
           
           # Download and install cardano-cli
-          wget https://github.com/IntersectMBO/cardano-node/releases/download/10.2.1/cardano-node-10.2.1-linux.tar.gz -O ~/.cache/cardano-cli/cardano-node_8.7.3_linux.tar.gz
+          wget https://github.com/IntersectMBO/cardano-node/releases/download/10.2.1/cardano-node-10.2.1-linux.tar.gz -O ~/.cache/cardano-cli/cardano-node_10.2.1_linux.tar.gz
           
           # Extract with verbose output to see the structure
-          tar -tvf ~/.cache/cardano-cli/cardano-node_8.7.3_linux.tar.gz
+          tar -tvf ~/.cache/cardano-cli/cardano-node_10.2.1_linux.tar.gz
           
           # Extract the tar file
-          tar -xzf ~/.cache/cardano-cli/cardano-node_8.7.3_linux.tar.gz -C ~/.cache/cardano-cli
+          tar -xzf ~/.cache/cardano-cli/cardano-node_10.2.1_linux.tar.gz -C ~/.cache/cardano-cli
           
           # List the contents to verify
           echo "Contents of cache directory:"
@@ -216,23 +260,125 @@ jobs:
           # Add to PATH for the current session
           echo "$(dirname "$CARDANO_CLI_PATH")" >> $GITHUB_PATH
 
+      - name: Cache Yaci DevKit
+        uses: actions/cache@v3
+        id: yaci-cache
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-yaci-devkit-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-yaci-devkit-
+
+      - name: Cache Yaci Components
+        uses: actions/cache@v3
+        id: yaci-components-cache
+        with:
+          path: ~/.yaci-components
+          key: ${{ runner.os }}-yaci-components-0.2.0
+          restore-keys: |
+            ${{ runner.os }}-yaci-components-
+
       - name: Install Yaci DevKit
+        if: steps.yaci-cache.outputs.cache-hit != 'true'
         run: npm install -g @bloxbean/yaci-devkit
 
       - name: Start Yaci DevKit in background
-        run: nohup  yaci-devkit up --enable-yaci-store &
+        run: |
+          # Kill any existing Yaci DevKit processes
+          pkill -f yaci-devkit || true
+          
+          # Start Yaci DevKit with verbose output and use pre-downloaded components
+          nohup yaci-devkit up > yaci-devkit.log 2>&1 &
+          
+          # Save the process ID
+          echo $! > yaci-devkit.pid
+          
+          # Display the log file for debugging
+          tail -f yaci-devkit.log &
+          TAIL_PID=$!
+          
+          # Wait for the log to show that Yaci DevKit is starting
+          for i in {1..10}; do
+            if grep -q "Starting Yaci DevKit" yaci-devkit.log; then
+              echo "Yaci DevKit is starting..."
+              break
+            fi
+            echo "Waiting for Yaci DevKit to start in logs..."
+            sleep 2
+          done
+          
+          # Kill the tail process
+          kill $TAIL_PID || true
 
       - name: Wait for Yaci DevKit to start
         run: |
-          for i in {1..30}; do
-            if nc -z localhost 8080; then
-              echo "Yaci DevKit is up!"
+          # Check if the process is still running
+          if ! ps -p $(cat yaci-devkit.pid) > /dev/null; then
+            echo "Yaci DevKit process died. Log contents:"
+            cat yaci-devkit.log
+            exit 1
+          fi
+          
+          # Wait for the Cardano node socket to be available
+          for i in {1..60}; do
+            # Extract the socket path from the Yaci DevKit logs
+            YACI_SOCKET_PATH=$(grep -o "/root/.yaci-cli/local-clusters/default/node/node.sock" yaci-devkit.log || echo "")
+            
+            if [ -z "$YACI_SOCKET_PATH" ]; then
+              echo "Could not find socket path in Yaci DevKit logs. Using default path."
+              YACI_SOCKET_PATH="/root/.yaci-cli/local-clusters/default/node/node.sock"
+            fi
+            
+            # Check if the socket file exists
+            if [ -S "$YACI_SOCKET_PATH" ]; then
+              echo "Yaci DevKit Cardano node socket is up!"
               exit 0
             fi
-            echo "Waiting for Yaci DevKit to start..."
+            echo "Waiting for Yaci DevKit Cardano node socket to start... (attempt $i/60)"
             sleep 5
           done
-          echo "Yaci DevKit failed to start" >&2
+          
+          echo "Yaci DevKit failed to start. Log contents:"
+          cat yaci-devkit.log
+          exit 1
+          
+      - name: Create socket tunnel to Yaci DevKit
+        run: |
+          # Create the socket directory if it doesn't exist
+          sudo mkdir -p /tmp
+          sudo chmod 777 /tmp
+          
+          # Extract the socket path from the Yaci DevKit logs
+          YACI_SOCKET_PATH=$(grep -o "/root/.yaci-cli/local-clusters/default/node/node.sock" yaci-devkit.log || echo "")
+          
+          if [ -z "$YACI_SOCKET_PATH" ]; then
+            echo "Could not find socket path in Yaci DevKit logs. Using default path."
+            YACI_SOCKET_PATH="/root/.yaci-cli/local-clusters/default/node/node.sock"
+          fi
+          
+          echo "Using Yaci DevKit socket path: $YACI_SOCKET_PATH"
+          
+          # Kill any existing socat processes
+          pkill -f socat || true
+          
+          # Start socat in the background to create a tunnel from the Unix socket to the local socket
+          nohup socat UNIX-LISTEN:/tmp/cardano_node.socket,reuseaddr,fork UNIX-CONNECT:$YACI_SOCKET_PATH > socat.log 2>&1 &
+          
+          # Save the process ID
+          echo $! > socat.pid
+          
+          # Wait for the socket to be created
+          for i in {1..20}; do
+            if [ -S /tmp/cardano_node.socket ]; then
+              echo "Socket tunnel created successfully"
+              exit 0
+            fi
+            echo "Waiting for socket tunnel to be created... (attempt $i/20)"
+            sleep 2
+          done
+          
+          echo "Failed to create socket tunnel. Socat log:"
+          cat socat.log
           exit 1
   
       - name: Set up Elixir
@@ -255,4 +401,4 @@ jobs:
       - name: Run integration tests
         run: mix test --include integration
         env:
-          CARDANO_NODE_SOCKET_PATH: /tmp/cardano-node.socket
+          CARDANO_NODE_SOCKET_PATH: /tmp/cardano_node.socket
