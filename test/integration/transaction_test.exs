@@ -190,10 +190,10 @@ defmodule Xander.Integration.TransactionTest do
            "--out-file",
            tx_out
          ]) do
-      {:ok, _output} ->
+      {_output, 0} ->
         IO.puts("Successfully built transaction")
 
-      {:error, error} ->
+      {error, 1} ->
         IO.puts("Failed to build transaction: #{error}")
         # Create a dummy transaction file
         File.write!(tx_out, "{}")
@@ -212,10 +212,10 @@ defmodule Xander.Integration.TransactionTest do
            "--out-file",
            tx_signed
          ]) do
-      {:ok, _output} ->
+      {_output, 0} ->
         IO.puts("Successfully signed transaction")
 
-      {:error, error} ->
+      {error, 1} ->
         IO.puts("Failed to sign transaction: #{error}")
         # Create a dummy signed transaction file
         File.write!(tx_signed, "{}")
@@ -230,11 +230,11 @@ defmodule Xander.Integration.TransactionTest do
            "--tx-file",
            tx_signed
          ]) do
-      {:ok, output} ->
+      {output, 0} ->
         IO.puts("Successfully submitted transaction")
         assert output =~ "Transaction successfully submitted"
 
-      {:error, error} ->
+      {error, 1} ->
         IO.puts("Failed to submit transaction: #{error}")
         # In CI, we'll just pass the test since we can't actually submit transactions
         IO.puts("Skipping actual transaction submission check in CI environment")
