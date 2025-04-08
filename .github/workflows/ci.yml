@@ -198,20 +198,21 @@ jobs:
           sudo dpkg -i libssl1.1_1.1.1f-1ubuntu2_amd64.deb || true
           sudo apt-get install -f -y
 
-      - name: Cache Cardano CLI
+      - name: Cache Cardano CLI and Address
         uses: actions/cache@v3
-        id: cardano-cli-cache
+        id: cardano-cache
         with:
           path: |
             ~/.cache/cardano-cli
             /usr/local/bin/cardano-cli
             /usr/local/bin/cardano-node
-          key: ${{ runner.os }}-cardano-cli-10.2.1
+            /usr/local/bin/cardano-address
+          key: ${{ runner.os }}-cardano-tools-10.2.1
           restore-keys: |
-            ${{ runner.os }}-cardano-cli-
+            ${{ runner.os }}-cardano-tools-
 
-      - name: Install Cardano CLI
-        if: steps.cardano-cli-cache.outputs.cache-hit != 'true'
+      - name: Install Cardano Tools
+        if: steps.cardano-cache.outputs.cache-hit != 'true'
         run: |
           # Install dependencies
           sudo apt-get update
@@ -229,33 +230,42 @@ jobs:
           # Extract the tar file
           tar -xzf ~/.cache/cardano-cli/cardano-node_10.2.1_linux.tar.gz -C ~/.cache/cardano-cli
           
+          # Download and install cardano-address
+          wget https://github.com/IntersectMBO/cardano-addresses/releases/download/4.0.0/cardano-address-4.0.0-linux.tar.gz -O ~/.cache/cardano-cli/cardano-addresses.tar.gz
+          tar -xzf ~/.cache/cardano-cli/cardano-addresses.tar.gz -C ~/.cache/cardano-cli
+          
           # List the contents to verify
           echo "Contents of cache directory:"
           ls -la ~/.cache/cardano-cli
           
-          # Find the cardano-cli executable
+          # Find the executables
           CARDANO_CLI_PATH=$(find ~/.cache/cardano-cli -name "cardano-cli" -type f | head -n 1)
           CARDANO_NODE_PATH=$(find ~/.cache/cardano-cli -name "cardano-node" -type f | head -n 1)
+          CARDANO_ADDR_PATH=$(find ~/.cache/cardano-cli -name "cardano-address" -type f | head -n 1)
           
-          if [ -z "$CARDANO_CLI_PATH" ] || [ -z "$CARDANO_NODE_PATH" ]; then
-            echo "Could not find cardano-cli or cardano-node executables"
+          if [ -z "$CARDANO_CLI_PATH" ] || [ -z "$CARDANO_NODE_PATH" ] || [ -z "$CARDANO_ADDR_PATH" ]; then
+            echo "Could not find one or more required executables"
             find ~/.cache/cardano-cli -type f
             exit 1
           fi
           
           echo "Found cardano-cli at: $CARDANO_CLI_PATH"
           echo "Found cardano-node at: $CARDANO_NODE_PATH"
+          echo "Found cardano-address at: $CARDANO_ADDR_PATH"
           
           # Install to system
           sudo cp "$CARDANO_CLI_PATH" /usr/local/bin/cardano-cli
           sudo cp "$CARDANO_NODE_PATH" /usr/local/bin/cardano-node
+          sudo cp "$CARDANO_ADDR_PATH" /usr/local/bin/cardano-address
           
           # Make them executable
           sudo chmod +x /usr/local/bin/cardano-cli
           sudo chmod +x /usr/local/bin/cardano-node
+          sudo chmod +x /usr/local/bin/cardano-address
           
           # Verify installation
           cardano-cli --version
+          cardano-address --version
           
           # Add to PATH for the current session
           echo "$(dirname "$CARDANO_CLI_PATH")" >> $GITHUB_PATH

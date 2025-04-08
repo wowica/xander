@@ -16,15 +16,60 @@ defmodule Xander.Integration.TransactionTest do
   @staking_key1 "ed25519e_sk10p46hyz6h34lr5d6l0x89hrlhenj7lf9cha7ln8a6697jwh2t3dhgkz0lcr896rv773mupcc239vcs06uet0a44yqsrzdlx69wwy8tswkp56t"
   @utxo1 "dc0d0d0a13e683e443c575147ec12136e5ac6a4f994cd4189d4d25bed541c44d#0"
 
-  @address2 "addr_test1qr9xuxclxgx4gw3y4h4tcz4yvfmrt3e5nd3elphhf00a67xnrv5vjcv6tzehj2nnjj4cth4ndzyuf4asvvkgzeac2hfqk0za93"
-  @payment_key2 "ed25519e_sk1gqv3vkxkcg0pwqm6v9uw7g79z7mm8cn4j5xxwms60cuuuw82t3dcjn8pzsc26wn5sl93mzk3hex8uy4syf9e6xhqxp67cyz3mnka4uc0r9as0"
-  @staking_key2 "ed25519e_sk12qd8w9g5342kp8wpv8h3d53c40j8sgmge82m49kdlrhw5s82t3d5y4xwr4rdxyxj66heh7c7788npmvnlexqd7a6dxvz6amq4hxz2sgteyf6g"
-  @utxo2 "aae852d5d2b08c0a937a319fec0d9933bc3bc67b9d0a6bfd4001997b169364b3#0"
+  # @address2 "addr_test1qr9xuxclxgx4gw3y4h4tcz4yvfmrt3e5nd3elphhf00a67xnrv5vjcv6tzehj2nnjj4cth4ndzyuf4asvvkgzeac2hfqk0za93"
+  # @payment_key2 "ed25519e_sk1gqv3vkxkcg0pwqm6v9uw7g79z7mm8cn4j5xxwms60cuuuw82t3dcjn8pzsc26wn5sl93mzk3hex8uy4syf9e6xhqxp67cyz3mnka4uc0r9as0"
+  # @staking_key2 "ed25519e_sk12qd8w9g5342kp8wpv8h3d53c40j8sgmge82m49kdlrhw5s82t3d5y4xwr4rdxyxj66heh7c7788npmvnlexqd7a6dxvz6amq4hxz2sgteyf6g"
+  # @utxo2 "aae852d5d2b08c0a937a319fec0d9933bc3bc67b9d0a6bfd4001997b169364b3#0"
 
-  @address3 "addr_test1qqra0q073cecs03hr724psh3ppejrlpjuphgpdj7xjwvkqnhqttgsr5xuaaq2g805dldu3gq9gw7gwmgdyhpwkm59ensgyph06"
-  @payment_key3 "ed25519e_sk1spvy8qz8fdnqadfpvvkyyxt7gacxql644vf2dluj8lees0h2t3dean3h530f97ek3l4prclpy6qxcutzupym6rv9nxmwr733ea8j4gcl3haehI'"
-  @staking_key3 "ed25519e_sk15zd6l7z66zhmuxlw9mgt4wg9wqrx0lt058whnvsz9yqe2w02t3dh423fmrmtt4ru0d2yvudk993x8v0x6j308ev89w9prgp3cu7q60s40s8h4"
-  @utxo3 "145da89c02380f6f72d6acc8194cd9295eb2001c2d88f0b20fef647ec5a18f7f#0"
+  # @address3 "addr_test1qqra0q073cecs03hr724psh3ppejrlpjuphgpdj7xjwvkqnhqttgsr5xuaaq2g805dldu3gq9gw7gwmgdyhpwkm59ensgyph06"
+  # @payment_key3 "ed25519e_sk1spvy8qz8fdnqadfpvvkyyxt7gacxql644vf2dluj8lees0h2t3dean3h530f97ek3l4prclpy6qxcutzupym6rv9nxmwr733ea8j4gcl3haehI'"
+  # @staking_key3 "ed25519e_sk15zd6l7z66zhmuxlw9mgt4wg9wqrx0lt058whnvsz9yqe2w02t3dh423fmrmtt4ru0d2yvudk993x8v0x6j308ev89w9prgp3cu7q60s40s8h4"
+  # @utxo3 "145da89c02380f6f72d6acc8194cd9295eb2001c2d88f0b20fef647ec5a18f7f#0"
+
+  # Helper function to derive payment key from mnemonic using cardano-address
+  defp derive_payment_key(tmp_dir) do
+    mnemonic_file = Path.join(tmp_dir, "mnemonic.txt")
+    root_prv_file = Path.join(tmp_dir, "root.prv")
+    payment_prv_file = Path.join(tmp_dir, "payment.prv")
+    payment_skey = Path.join(tmp_dir, "payment.skey")
+
+    # Write mnemonic to file
+    File.write!(mnemonic_file, @mnemonic)
+
+    # Derive root private key using direct shell command
+    {output, 0} =
+      System.cmd(
+        "sh",
+        ["-c", "echo '#{@mnemonic}' | cardano-address key from-recovery-phrase Shelley"],
+        stderr_to_stdout: true
+      )
+
+    File.write!(root_prv_file, output)
+
+    # Derive payment signing key (account 0, address 0)
+    {output, 0} =
+      System.cmd(
+        "sh",
+        ["-c", "cat #{root_prv_file} | cardano-address key child 1852H/1815H/0H/0/0"],
+        stderr_to_stdout: true
+      )
+
+    File.write!(payment_prv_file, output)
+
+    # Convert to cardano-cli format
+    {_, 0} =
+      System.cmd("cardano-cli", [
+        "key",
+        "convert-cardano-address-key",
+        "--shelley-payment-key",
+        "--signing-key-file",
+        payment_prv_file,
+        "--out-file",
+        payment_skey
+      ])
+
+    payment_skey
+  end
 
   # Helper function to get the socket path from environment or use default
   defp get_socket_path do
@@ -46,38 +91,20 @@ defmodule Xander.Integration.TransactionTest do
         ["transaction", "submit" | rest] ->
           args ++ ["--testnet-magic", "42"]
 
+        ["build" | rest] ->
+          args ++ ["--testnet-magic", "42"]
+
+        ["submit" | rest] ->
+          args ++ ["--testnet-magic", "42"]
+
         _ ->
           args
       end
 
+    IO.puts("Running cardano-cli with args: #{inspect(args)}")
+
     {output, exit_code} = System.cmd("cardano-cli", ["latest"] ++ args)
     {output, exit_code}
-  end
-
-  # Helper function to convert key format
-  defp convert_key_format(input_key_file, output_key_file) do
-    # Write the key to a temporary file
-    File.write!(input_key_file, @payment_key0)
-
-    # Use cardano-cli to convert the key format
-    {output, exit_code} =
-      System.cmd("cardano-cli", [
-        "key",
-        "convert-cardano-address-key",
-        "--shelley-payment-key",
-        "--signing-key-file",
-        input_key_file,
-        "--out-file",
-        output_key_file
-      ])
-
-    if exit_code == 0 do
-      IO.puts("Successfully converted key format")
-      output_key_file
-    else
-      IO.puts("Failed to convert key format: #{output}")
-      input_key_file
-    end
   end
 
   # Helper function to check if socket exists and is accessible
@@ -107,18 +134,18 @@ defmodule Xander.Integration.TransactionTest do
     {version_output, _} = System.cmd("cardano-cli", ["--version"])
     IO.puts("cardano-cli version: #{version_output}")
 
+    # Print cardano-address version at the start of setup
+    {address_version_output, _} = System.cmd("cardano-address", ["--version"])
+    IO.puts("cardano-address version: #{address_version_output}")
+
     # Create a temporary directory for transaction files
     tmp_dir = Path.join(System.tmp_dir!(), "xander_test_#{:rand.uniform(1_000_000)}")
     File.mkdir_p!(tmp_dir)
     IO.puts("Created temporary directory: #{tmp_dir}")
 
-    # Define key file paths
-    input_key_file = Path.join(tmp_dir, "input.skey")
-    payment_skey = Path.join(tmp_dir, "payment.skey")
-
-    # Try to convert the key format
-    converted_key_file = convert_key_format(input_key_file, payment_skey)
-    IO.puts("Using key file: #{converted_key_file}")
+    # Derive payment key from mnemonic
+    payment_skey = derive_payment_key(tmp_dir)
+    IO.puts("Derived payment key: #{payment_skey}")
 
     # Check socket before proceeding
     socket_path = get_socket_path()
@@ -137,7 +164,7 @@ defmodule Xander.Integration.TransactionTest do
 
     %{
       tmp_dir: tmp_dir,
-      payment_skey: converted_key_file,
+      payment_skey: payment_skey,
       socket_path: socket_path
     }
   end
@@ -184,7 +211,7 @@ defmodule Xander.Integration.TransactionTest do
            "--tx-in",
            @utxo0,
            "--tx-out",
-           "#{@address1}+1000000",
+           "#{@address1} 1000000",
            "--change-address",
            @address0,
            "--out-file",
