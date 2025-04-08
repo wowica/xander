@@ -50,7 +50,7 @@ defmodule Xander.Integration.TransactionTest do
           args
       end
 
-    {output, exit_code} = System.cmd("cardano-cli", args)
+    {output, exit_code} = System.cmd("cardano-cli", ["latest"] ++ args)
     {output, exit_code}
   end
 
@@ -203,8 +203,6 @@ defmodule Xander.Integration.TransactionTest do
     case run_cardano_cli([
            "transaction",
            "sign",
-           "--socket-path",
-           socket_path,
            "--tx-body-file",
            tx_out,
            "--signing-key-file",
