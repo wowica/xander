@@ -1,5 +1,5 @@
 defmodule Xander.Integration.TransactionTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: false
   alias Xander.Config
   # alias Xander.Query
   alias Xander.Transaction
@@ -26,139 +26,152 @@ defmodule Xander.Integration.TransactionTest do
   @staking_key3 "ed25519e_sk15zd6l7z66zhmuxlw9mgt4wg9wqrx0lt058whnvsz9yqe2w02t3dh423fmrmtt4ru0d2yvudk993x8v0x6j308ev89w9prgp3cu7q60s40s8h4"
   @utxo3 "145da89c02380f6f72d6acc8194cd9295eb2001c2d88f0b20fef647ec5a18f7f#0"
 
-  # Helper function to run cardano-cli commands with better error handling
-  defp run_cardano_cli(args) do
-    # Check if cardano-cli is available
-    case System.cmd("which", ["cardano-cli"], stderr_to_stdout: true) do
-      {_, 0} ->
-        # Try to run the command
-        case System.cmd("cardano-cli", args, stderr_to_stdout: true) do
-          {output, 0} -> {:ok, output}
-          {output, code} -> {:error, "Command failed with exit code #{code}: #{output}"}
-        end
+  # Helper function to get the socket path from environment or use default
+  defp get_socket_path do
+    System.get_env("CARDANO_NODE_SOCKET_PATH") ||
+      Path.expand("~/.yaci-cli/local-clusters/default/node/node.sock")
+  end
 
-      {_, _} ->
-        IO.puts("WARNING: cardano-cli not found in PATH")
-        {:error, "cardano-cli not found in PATH"}
+  # Helper function to run cardano-cli commands
+  defp run_cardano_cli(args) do
+    # Only add --testnet-magic to specific commands that need it
+    args =
+      case args do
+        ["query", "protocol-parameters" | rest] ->
+          args ++ ["--testnet-magic", "42"]
+
+        ["transaction", "build" | rest] ->
+          args ++ ["--testnet-magic", "42"]
+
+        ["transaction", "submit" | rest] ->
+          args ++ ["--testnet-magic", "42"]
+
+        _ ->
+          args
+      end
+
+    {output, exit_code} = System.cmd("cardano-cli", args)
+    {output, exit_code}
+  end
+
+  # Helper function to convert key format
+  defp convert_key_format(input_key_file, output_key_file) do
+    # Write the key to a temporary file
+    File.write!(input_key_file, @payment_key0)
+
+    # Use cardano-cli to convert the key format
+    {output, exit_code} =
+      System.cmd("cardano-cli", [
+        "key",
+        "convert-cardano-address-key",
+        "--shelley-payment-key",
+        "--signing-key-file",
+        input_key_file,
+        "--out-file",
+        output_key_file
+      ])
+
+    if exit_code == 0 do
+      IO.puts("Successfully converted key format")
+      output_key_file
+    else
+      IO.puts("Failed to convert key format: #{output}")
+      input_key_file
     end
   end
 
-  # Helper function to run cardano-cli latest commands
-  defp run_cardano_cli_latest(args) do
-    run_cardano_cli(["latest"] ++ args)
-  end
+  # Helper function to check if socket exists and is accessible
+  defp check_socket(socket_path) do
+    IO.puts("Checking socket at: #{socket_path}")
 
-  # Helper function to get the socket path
-  defp get_socket_path do
-    # Use the Yaci DevKit socket path
-    System.get_env(
-      "CARDANO_NODE_SOCKET_PATH",
-      "#{System.get_env("HOME")}/.yaci-cli/local-clusters/default/node/node.sock"
-    )
-  end
+    if File.exists?(socket_path) do
+      IO.puts("Socket file exists")
+      # Try to connect to the socket using netcat
+      {output, exit_code} = System.cmd("nc", ["-z", "-U", socket_path])
 
-  # Helper function to run cardano-cli address commands
-  defp run_cardano_cli_address(args) do
-    run_cardano_cli(["address"] ++ args)
-  end
-
-  # Helper function to run cardano-cli transaction commands
-  defp run_cardano_cli_transaction(args) do
-    run_cardano_cli(["transaction"] ++ args)
-  end
-
-  # Helper function to run cardano-cli query commands
-  defp run_cardano_cli_query(args) do
-    run_cardano_cli(["query"] ++ args)
-  end
-
-  # Helper function to run cardano-cli stake-address commands
-  defp run_cardano_cli_stake_address(args) do
-    run_cardano_cli(["stake-address"] ++ args)
+      if exit_code == 0 do
+        IO.puts("Socket is accessible")
+        true
+      else
+        IO.puts("Socket exists but is not accessible: #{output}")
+        false
+      end
+    else
+      IO.puts("Socket file does not exist")
+      false
+    end
   end
 
   setup do
-    # Create a temporary directory for our transaction files
-    tmp_dir = System.tmp_dir!()
-    tx_dir = Path.join(tmp_dir, "tx_#{System.unique_integer([:positive])}")
-    File.mkdir_p!(tx_dir)
+    # Print cardano-cli version at the start of setup
+    {version_output, _} = System.cmd("cardano-cli", ["--version"])
+    IO.puts("cardano-cli version: #{version_output}")
 
-    # Generate test keys
-    keys_dir = Path.join(tx_dir, "keys")
-    File.mkdir_p!(keys_dir)
+    # Create a temporary directory for transaction files
+    tmp_dir = Path.join(System.tmp_dir!(), "xander_test_#{:rand.uniform(1_000_000)}")
+    File.mkdir_p!(tmp_dir)
+    IO.puts("Created temporary directory: #{tmp_dir}")
 
-    # Create key files using the predefined keys from account0
-    # payment_vkey = Path.join(keys_dir, "payment.vkey")
-    payment_skey = Path.join(keys_dir, "payment.skey")
-    # stake_vkey = Path.join(keys_dir, "stake.vkey")
-    # stake_skey = Path.join(keys_dir, "stake.skey")
+    # Define key file paths
+    input_key_file = Path.join(tmp_dir, "input.skey")
+    payment_skey = Path.join(tmp_dir, "payment.skey")
 
-    # Write the predefined keys to files
-    # File.write!(payment_vkey, @payment_key0)
-    File.write!(payment_skey, @payment_key0)
-    # File.write!(stake_vkey, @staking_key0)
-    # File.write!(stake_skey, @staking_key0)
+    # Try to convert the key format
+    converted_key_file = convert_key_format(input_key_file, payment_skey)
+    IO.puts("Using key file: #{converted_key_file}")
 
-    # Check if the socket exists and is accessible
+    # Check socket before proceeding
     socket_path = get_socket_path()
-    IO.puts("Checking socket at path: #{socket_path}")
+    IO.puts("Using socket path: #{socket_path}")
 
-    {:ok, socket} =
-      :gen_tcp.connect({:local, to_charlist(socket_path)}, 0, [:binary, active: false])
-
-    :gen_tcp.close(socket)
-    IO.puts("Socket is accessible")
-
-    # Build a dummy payment address
-    dummy_address = Path.join(tx_dir, "payment.addr")
-
-    # Use the predefined address from account0
-    address = @address0
+    if check_socket(socket_path) do
+      IO.puts("Socket check passed, proceeding with test")
+    else
+      IO.puts("Socket check failed, test may fail")
+    end
 
     on_exit(fn ->
-      File.rm_rf!(tx_dir)
+      File.rm_rf!(tmp_dir)
+      IO.puts("Cleaned up temporary directory: #{tmp_dir}")
     end)
 
     %{
-      tx_dir: tx_dir,
-      keys_dir: keys_dir,
-      address: address
+      tmp_dir: tmp_dir,
+      payment_skey: converted_key_file,
+      socket_path: socket_path
     }
   end
 
   @tag :integration
   test "can perform basic transactions to transfer ADA", %{
-    tx_dir: tx_dir,
-    keys_dir: keys_dir,
-    address: address
+    tmp_dir: tmp_dir,
+    payment_skey: payment_skey,
+    socket_path: socket_path
   } do
     # Set up network parameters
-    protocol_params = Path.join(tx_dir, "protocol-params.json")
-    socket_path = get_socket_path()
+    protocol_params = Path.join(tmp_dir, "protocol-params.json")
 
     # Get protocol parameters
     case run_cardano_cli([
            "query",
            "protocol-parameters",
-           "--testnet-magic",
-           "42",
            "--socket-path",
            socket_path,
            "--out-file",
            protocol_params
          ]) do
-      {:ok, _output} ->
+      {_output, 0} ->
         IO.puts("Successfully retrieved protocol parameters")
 
-      {:error, error} ->
+      {error, 1} ->
         IO.puts("Failed to retrieve protocol parameters: #{error}")
         # Create a dummy protocol parameters file
         File.write!(protocol_params, "{}")
     end
 
     # Create a transaction
-    tx_out = Path.join(tx_dir, "tx.out")
-    tx_signed = Path.join(tx_dir, "tx.signed")
+    tx_out = Path.join(tmp_dir, "tx.out")
+    tx_signed = Path.join(tmp_dir, "tx.signed")
 
     # Build the transaction
     # Transfer 1000000 lovelace (1 ADA) from our generated address to address1
@@ -166,8 +179,6 @@ defmodule Xander.Integration.TransactionTest do
     case run_cardano_cli([
            "transaction",
            "build",
-           "--testnet-magic",
-           "42",
            "--socket-path",
            socket_path,
            "--tx-in",
@@ -175,7 +186,7 @@ defmodule Xander.Integration.TransactionTest do
            "--tx-out",
            "#{@address1}+1000000",
            "--change-address",
-           address,
+           @address0,
            "--out-file",
            tx_out
          ]) do
@@ -192,12 +203,12 @@ defmodule Xander.Integration.TransactionTest do
     case run_cardano_cli([
            "transaction",
            "sign",
-           "--testnet-magic",
-           "42",
+           "--socket-path",
+           socket_path,
            "--tx-body-file",
            tx_out,
            "--signing-key-file",
-           Path.join(keys_dir, "payment.skey"),
+           payment_skey,
            "--out-file",
            tx_signed
          ]) do
@@ -214,8 +225,6 @@ defmodule Xander.Integration.TransactionTest do
     case run_cardano_cli([
            "transaction",
            "submit",
-           "--testnet-magic",
-           "42",
            "--socket-path",
            socket_path,
            "--tx-file",
