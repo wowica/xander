@@ -257,7 +257,9 @@ defmodule Xander.Integration.TransactionTest do
          ]) do
       {output, 0} ->
         IO.puts("Successfully submitted transaction")
-        assert output =~ "Transaction successfully submitted"
+
+        assert output =~
+                 "{\"txhash\":\"dc41709a0ec7c54b8a11c4dec9a28b1d41bb7968a216ff77a0c38031ffb2da5f\"}\n"
 
       {error, 1} ->
         IO.puts("Failed to submit transaction: #{error}")
