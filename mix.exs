@@ -29,7 +29,9 @@ defmodule Xander.MixProject do
 
   defp deps do
     [
+      {:blake2, "~> 1.0"},
       {:cbor, "~> 1.0"},
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.29", only: :dev, runtime: false}
     ]
   end

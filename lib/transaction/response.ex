@@ -5,6 +5,16 @@ defmodule Xander.Transaction.Response do
 
   require Logger
 
+  @type error_reason ::
+          :cannot_decode_non_binary_values
+          | :cbor_function_clause_error
+          | :cbor_match_error
+          | :invalid_format
+          | :invalid_input
+          | :disconnected
+
+  @type t :: {:ok, :accepted} | {:rejected, any()} | {:error, error_reason}
+
   @doc """
   Parses the response from a transaction. Accepts CBOR encoded responses.
 
@@ -34,16 +44,7 @@ defmodule Xander.Transaction.Response do
       iex> Xander.Transaction.Response.parse_response(nil)
       {:error, :invalid_input}
   """
-  @spec parse_response(binary() | nil) ::
-          {:error,
-           :cannot_decode_non_binary_values
-           | :cbor_function_clause_error
-           | :cbor_match_error
-           | :invalid_format
-           | :invalid_input
-           | :disconnected}
-          | {:rejected, any()}
-          | {:ok, :accepted}
+  @spec parse_response(binary() | nil) :: t()
   def parse_response(cbor_response) do
     case Xander.Util.plex(cbor_response) do
       {:ok, %{payload: cbor_response_payload}} ->
