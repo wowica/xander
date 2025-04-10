@@ -1,8 +1,7 @@
 # Install Xander from local path
 Mix.install([
-  {:xander, path: Path.expand(".")},
-  {:cbor, "~> 1.0.0"},
-  {:blake2, "~> 1.0.0"}
+  {:blake2, "~> 1.0.0"},
+  {:xander, path: Path.expand(".")}
 ])
 
 socket_path = System.get_env("CARDANO_NODE_SOCKET_PATH", "/tmp/cardano-node-preview.socket")
@@ -22,11 +21,10 @@ case Transaction.start_link(config) do
   {:ok, pid} ->
     IO.puts("Successfully connected to Cardano node 🎉\n")
 
-    tx_hex =
-      ""
+    tx_hex = ""
 
     case Transaction.send(pid, tx_hex) do
-      {:accepted, tx_id} -> IO.puts("Transaction submitted successfully: #{tx_id}")
+      {:accepted, tx_id} -> IO.puts("\nTransaction submitted successfully ✅\nTx ID: #{tx_id}")
       _ -> IO.puts("Error submitting transaction")
     end
 
