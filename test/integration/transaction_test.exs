@@ -298,26 +298,45 @@ defmodule Xander.Integration.TransactionTest do
         end
       end)
 
-    # Now submit all transactions in sequence
-    Enum.each(signed_transactions, fn {index, tx_cbor, tx_signed} ->
-      case Xander.Transaction.send(tx_cbor) do
-        {:ok, tx_hash} ->
-          IO.puts("Successfully submitted transaction #{index} with Xander: #{tx_hash}")
-          assert :accepted == tx_hash
+    # Submit all transactions in parallel and collect responses
+    tasks =
+      Enum.map(signed_transactions, fn {index, tx_cbor, tx_signed} ->
+        Task.async(fn ->
+          case :gen_statem.call(Xander.Transaction, {:request, :send_tx, tx_cbor}) do
+            {:ok, response} ->
+              IO.puts(
+                "Received successful response for transaction #{index}: #{inspect(response)}"
+              )
 
-        {:error, %{type: :refused}} ->
-          IO.puts(
-            "Handshake refused by node for transaction #{index}. Falling back to cardano-cli."
-          )
+              assert response == :accepted
+              {index, :ok}
 
-          assert false
+            {:rejected, reason} ->
+              IO.puts("Transaction #{index} was rejected: #{inspect(reason)}")
+              assert false
 
-        {:error, error} ->
-          IO.puts("Failed to submit transaction #{index} with Xander: #{error}")
-          # In CI, we'll just pass the test since we can't actually submit transactions
-          IO.puts("Skipping actual transaction submission check in CI environment")
-          assert true
-      end
-    end)
+            {:error, error} ->
+              IO.puts("Error processing transaction #{index}: #{inspect(error)}")
+              assert false
+
+            {:error, %{type: :refused}} ->
+              IO.puts(
+                "Handshake refused by node for transaction #{index}. Falling back to cardano-cli."
+              )
+
+              assert false
+
+            {:error, error} ->
+              IO.puts("Failed to submit transaction #{index} with Xander: #{error}")
+              # In CI, we'll just pass the test since we can't actually submit transactions
+              IO.puts("Skipping actual transaction submission check in CI environment")
+              assert true
+              {index, :error}
+          end
+        end)
+      end)
+
+    # Wait for all responses
+    responses = Enum.map(tasks, &Task.await(&1, 30_000))
   end
 end
