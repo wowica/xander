@@ -183,22 +183,35 @@ defmodule Xander.Transaction do
           | {:keep_state, t(), [{:next_event, :internal, :send_tx}]}
   def busy(_event_type, _event_content, _data)
 
-  # Handle internal event to send a transaction (from idle state)
+  # Handle new transaction requests while busy
+  def busy(
+        {:call, from},
+        {:request, :send_tx, tx_hash},
+        %__MODULE__{queue: queue} = data
+      ) do
+    # Add new request to queue so that it can be processed
+    # after the current transaction is complete.
+    new_queue = :queue.in({from, tx_hash}, queue)
+    new_data = %__MODULE__{data | queue: new_queue}
+    {:keep_state, new_data}
+  end
+
   def busy(
         :internal,
         :send_tx,
-        %__MODULE__{client: client, socket: socket} = data
+        %__MODULE__{client: client, socket: socket, queue: queue} = data
       ) do
-    # Get the current transaction from queue without removing it
-    {:value, {_from, tx_hash}} = :queue.peek(data.queue)
+    case :queue.peek(queue) do
+      {:value, {_from, tx_hash}} ->
+        :inet.setopts(socket, active: :once)
 
-    # Set socket to active mode before sending to be ready to receive response
-    :inet.setopts(socket, active: :once)
+        :ok = client.send(socket, Messages.transaction(tx_hash))
+        {:keep_state, data}
 
-    # Send transaction to node and remain in busy state
-    :ok = client.send(socket, Messages.transaction(tx_hash))
-
-    {:keep_state, data}
+      :empty ->
+        # No more transactions to process, transition to idle
+        {:next_state, :idle, data}
+    end
   end
 
   def busy(:info, {:tcp_closed, _socket}, %__MODULE__{socket: _data_socket} = data) do
@@ -211,8 +224,7 @@ defmodule Xander.Transaction do
     {:next_state, :disconnected, data}
   end
 
-  # This function is invoked due to the socket being set to active mode.
-  # Handles the response while in busy state.
+  # Handle response from node
   def busy(
         :info,
         {_tcp_or_ssl, _socket, bytes},
@@ -269,8 +281,16 @@ defmodule Xander.Transaction do
   defp process_queue_item(data, result) do
     {{:value, {caller, _tx_hash}}, new_data} = get_and_update_in(data.queue, &:queue.out/1)
     actions = [{:reply, caller, result}]
-    next_state = if :queue.is_empty(new_data.queue), do: :idle, else: :busy
-    {:next_state, next_state, new_data, actions}
+
+    # Check if there are more items in the queue.
+    # These are from calls that came in while the current transaction was being processed.
+    case :queue.is_empty(new_data.queue) do
+      true ->
+        {:next_state, :idle, new_data, actions}
+
+      false ->
+        {:next_state, :busy, new_data, actions ++ [{:next_event, :internal, :send_tx}]}
+    end
   end
 
   defp maybe_local_path(path, :socket), do: {:local, path}
