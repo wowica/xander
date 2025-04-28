@@ -39,7 +39,7 @@ jobs:
         run: mix deps.get
 
       - name: Run tests
-        run: mix test
+        run: mix test --warnings-as-errors
 
   integration_test:
     runs-on: ubuntu-latest
@@ -240,6 +240,6 @@ jobs:
         run: mix deps.get
 
       - name: Run integration tests
-        run: mix test --include integration
+        run: mix test --include integration --warnings-as-errors
         env:
           CARDANO_NODE_SOCKET_PATH: ${{ env.CARDANO_NODE_SOCKET_PATH }}
