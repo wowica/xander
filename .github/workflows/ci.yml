@@ -9,7 +9,7 @@ on:
       - main
 
 jobs:
-  test:
+  unit_test:
     runs-on: ubuntu-latest
 
     strategy:
@@ -39,4 +39,207 @@ jobs:
         run: mix deps.get
 
       - name: Run tests
-        run: mix test
+        run: mix test --warnings-as-errors
+
+  integration_test:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        elixir-version: [1.18]
+        otp-version: [26.0]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.8.0'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y netcat-openbsd socat
+          
+          # Download and install libssl1.1 manually
+          wget http://archive.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2_amd64.deb
+          sudo dpkg -i libssl1.1_1.1.1f-1ubuntu2_amd64.deb || true
+          sudo apt-get install -f -y
+
+      - name: Cache Cardano CLI and Address
+        uses: actions/cache@v3
+        id: cardano-cache
+        with:
+          path: |
+            ~/.cache/cardano-cli
+            /usr/local/bin/cardano-cli
+            /usr/local/bin/cardano-node
+            /usr/local/bin/cardano-address
+          key: ${{ runner.os }}-cardano-tools-10.2.1
+          restore-keys: |
+            ${{ runner.os }}-cardano-tools-
+
+      - name: Install Cardano Tools
+        if: steps.cardano-cache.outputs.cache-hit != 'true'
+        run: |
+          # Install dependencies
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libffi-dev libgmp-dev libssl-dev libtinfo-dev libsystemd-dev libsodium-dev zlib1g-dev make g++ jq libncursesw6 libtinfo6
+          
+          # Create cache directory
+          mkdir -p ~/.cache/cardano-cli
+          
+          # Download and install cardano-cli
+          wget https://github.com/IntersectMBO/cardano-node/releases/download/10.2.1/cardano-node-10.2.1-linux.tar.gz -O ~/.cache/cardano-cli/cardano-node_10.2.1_linux.tar.gz
+          
+          # Extract with verbose output to see the structure
+          tar -tvf ~/.cache/cardano-cli/cardano-node_10.2.1_linux.tar.gz
+          
+          # Extract the tar file
+          tar -xzf ~/.cache/cardano-cli/cardano-node_10.2.1_linux.tar.gz -C ~/.cache/cardano-cli
+          
+          # Download and install cardano-address
+          wget https://github.com/IntersectMBO/cardano-addresses/releases/download/4.0.0/cardano-address-4.0.0-linux.tar.gz -O ~/.cache/cardano-cli/cardano-addresses.tar.gz
+          tar -xzf ~/.cache/cardano-cli/cardano-addresses.tar.gz -C ~/.cache/cardano-cli
+          
+          # List the contents to verify
+          echo "Contents of cache directory:"
+          ls -la ~/.cache/cardano-cli
+          
+          # Find the executables
+          CARDANO_CLI_PATH=$(find ~/.cache/cardano-cli -name "cardano-cli" -type f | head -n 1)
+          CARDANO_NODE_PATH=$(find ~/.cache/cardano-cli -name "cardano-node" -type f | head -n 1)
+          CARDANO_ADDR_PATH=$(find ~/.cache/cardano-cli -name "cardano-address" -type f | head -n 1)
+          
+          if [ -z "$CARDANO_CLI_PATH" ] || [ -z "$CARDANO_NODE_PATH" ] || [ -z "$CARDANO_ADDR_PATH" ]; then
+            echo "Could not find one or more required executables"
+            find ~/.cache/cardano-cli -type f
+            exit 1
+          fi
+          
+          echo "Found cardano-cli at: $CARDANO_CLI_PATH"
+          echo "Found cardano-node at: $CARDANO_NODE_PATH"
+          echo "Found cardano-address at: $CARDANO_ADDR_PATH"
+          
+          # Install to system
+          sudo cp "$CARDANO_CLI_PATH" /usr/local/bin/cardano-cli
+          sudo cp "$CARDANO_NODE_PATH" /usr/local/bin/cardano-node
+          sudo cp "$CARDANO_ADDR_PATH" /usr/local/bin/cardano-address
+          
+          # Make them executable
+          sudo chmod +x /usr/local/bin/cardano-cli
+          sudo chmod +x /usr/local/bin/cardano-node
+          sudo chmod +x /usr/local/bin/cardano-address
+          
+          # Verify installation
+          cardano-cli --version
+          cardano-address --version
+          
+          # Add to PATH for the current session
+          echo "$(dirname "$CARDANO_CLI_PATH")" >> $GITHUB_PATH
+
+      - name: Cache Yaci DevKit
+        uses: actions/cache@v3
+        id: yaci-cache
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-yaci-devkit-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-yaci-devkit-
+
+      - name: Cache Yaci Components
+        uses: actions/cache@v3
+        id: yaci-components-cache
+        with:
+          path: ~/.yaci-components
+          key: ${{ runner.os }}-yaci-components-0.2.0
+          restore-keys: |
+            ${{ runner.os }}-yaci-components-
+
+      - name: Install Yaci DevKit
+        run: npm install -g @bloxbean/yaci-devkit
+
+      - name: Start Yaci DevKit in background
+        run: |
+          # Kill any existing Yaci DevKit processes
+          pkill -f yaci-devkit || true
+          
+          # Start Yaci DevKit with verbose output and use pre-downloaded components
+          nohup yaci-devkit up > yaci-devkit.log 2>&1 &
+          
+          # Save the process ID
+          echo $! > yaci-devkit.pid
+          
+          # Display the log file for debugging
+          tail -f yaci-devkit.log &
+          TAIL_PID=$!
+          
+          # Wait for the log to show that Yaci DevKit is starting
+          for i in {1..10}; do
+            if grep -q "Starting Yaci DevKit" yaci-devkit.log; then
+              echo "Yaci DevKit is starting..."
+              break
+            fi
+            echo "Waiting for Yaci DevKit to start in logs..."
+            sleep 2
+          done
+          
+          # Kill the tail process
+          kill $TAIL_PID || true
+
+      - name: Wait for Yaci DevKit to start
+        run: |
+          # Check if the process is still running
+          if ! ps -p $(cat yaci-devkit.pid) > /dev/null; then
+            echo "Yaci DevKit process died. Log contents:"
+            cat yaci-devkit.log
+            exit 1
+          fi
+          
+          # Wait for the Cardano node socket to be available
+          for i in {1..60}; do
+            # Extract the socket path from the Yaci DevKit logs
+            YACI_SOCKET_PATH=$(grep -o "$HOME/.yaci-cli/local-clusters/default/node/node.sock" yaci-devkit.log || echo "")
+            
+            if [ -z "$YACI_SOCKET_PATH" ]; then
+              echo "Could not find socket path in Yaci DevKit logs. Using default path."
+              YACI_SOCKET_PATH="$HOME/.yaci-cli/local-clusters/default/node/node.sock"
+            fi
+            
+            # Check if the socket file exists
+            if [ -S "$YACI_SOCKET_PATH" ]; then
+              echo "Yaci DevKit Cardano node socket is up!"
+              echo "CARDANO_NODE_SOCKET_PATH=$YACI_SOCKET_PATH" >> $GITHUB_ENV
+              exit 0
+            fi
+            echo "Waiting for Yaci DevKit Cardano node socket to start... (attempt $i/60)"
+            sleep 5
+          done
+          
+          echo "Yaci DevKit failed to start. Log contents:"
+          cat yaci-devkit.log
+          exit 1
+
+      - name: Set up Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ matrix.elixir-version }}
+          otp-version: ${{ matrix.otp-version }}
+
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        with:
+          path: deps
+          key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Run integration tests
+        run: mix test --include integration --warnings-as-errors
+        env:
+          CARDANO_NODE_SOCKET_PATH: ${{ env.CARDANO_NODE_SOCKET_PATH }}
