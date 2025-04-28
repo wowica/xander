@@ -159,7 +159,6 @@ jobs:
             ${{ runner.os }}-yaci-components-
 
       - name: Install Yaci DevKit
-        if: steps.yaci-cache.outputs.cache-hit != 'true'
         run: npm install -g @bloxbean/yaci-devkit
 
       - name: Start Yaci DevKit in background
