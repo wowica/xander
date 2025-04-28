@@ -302,7 +302,7 @@ defmodule Xander.Integration.TransactionTest do
     tasks =
       Enum.map(signed_transactions, fn {index, tx_cbor, tx_signed} ->
         Task.async(fn ->
-          case :gen_statem.call(Xander.Transaction, {:request, :send_tx, tx_cbor}) do
+          case Xander.Transaction.send(tx_cbor) do
             {:ok, response} ->
               IO.puts(
                 "Received successful response for transaction #{index}: #{inspect(response)}"
