@@ -194,8 +194,7 @@ defmodule Xander.Transaction do
       ) do
     # Add new request to queue so that it can be processed
     # after the current transaction is complete.
-    tx_id = Hash.get_id(tx_hash)
-    new_queue = :queue.in({from, tx_hash, tx_id}, queue)
+    new_queue = :queue.in({from, tx_hash}, queue)
     new_data = %__MODULE__{data | queue: new_queue}
     {:keep_state, new_data}
   end
@@ -206,7 +205,7 @@ defmodule Xander.Transaction do
         %__MODULE__{client: client, socket: socket, queue: queue} = data
       ) do
     case :queue.peek(queue) do
-      {:value, {_from, tx_hash, _tx_id}} ->
+      {:value, {_from, tx_hash}} ->
         :inet.setopts(socket, active: :once)
 
         :ok = client.send(socket, Messages.transaction(tx_hash))
@@ -272,11 +271,7 @@ defmodule Xander.Transaction do
     # transactions that are sent from the dependent process while the current
     # transaction is being processed.
 
-    # Extract the transaction ID from the transaction hash.
-    # This value will be returned to the caller when the transaction is accepted.
-    tx_id = Hash.get_id(tx_hash)
-
-    data = update_in(data.queue, &:queue.in({from, tx_hash, tx_id}, &1))
+    data = update_in(data.queue, &:queue.in({from, tx_hash}, &1))
 
     {:next_state, :busy, data, [{:next_event, :internal, :send_tx}]}
   end
@@ -288,14 +283,14 @@ defmodule Xander.Transaction do
   end
 
   defp process_queue_item(data, result) do
-    {{:value, {caller, _tx_hash, tx_id}}, new_data} =
+    {{:value, {caller, tx_hash}}, new_data} =
       get_and_update_in(data.queue, &:queue.out/1)
 
     submission_result =
       case result do
         # If transaction was accepted, then include the tx id
         # in the result tuple for the client
-        {:ok, :accepted} -> {:accepted, tx_id}
+        {:ok, :accepted} -> {:accepted, Hash.get_id(tx_hash)}
         # If not accepted, then return the result as is
         _ -> result
       end
