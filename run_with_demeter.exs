@@ -1,5 +1,6 @@
 # Install Xander from local path
 Mix.install([
+  {:blake2, "~> 1.0"},
   {:xander, path: Path.expand(".")}
 ])
 

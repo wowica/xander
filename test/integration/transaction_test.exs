@@ -291,12 +291,10 @@ defmodule Xander.Integration.TransactionTest do
       Enum.map(signed_transactions, fn {index, tx_cbor, _tx_signed} ->
         Task.async(fn ->
           case Xander.Transaction.send(tx_cbor) do
-            {:ok, response} ->
-              IO.puts(
-                "Received successful response for transaction #{index}: #{inspect(response)}"
-              )
+            {:accepted, tx_id} ->
+              IO.puts("Received successful response for transaction #{index}: #{inspect(tx_id)}")
 
-              assert response == :accepted
+              assert tx_id == Xander.Transaction.Hash.get_id(tx_cbor)
               {index, :ok}
 
             {:rejected, reason} ->
