@@ -14,7 +14,7 @@ This assumes you have Elixir installed. In order to run the script directly, fol
 3. Ensure the `Config.default_config!` function call matches the network being used:
     - `Config.default_config!(socket_path)` defaults to Mainnet
     - `Config.default_config!(socket_path, :preview)` for Preview network
-4. Run `elixir submit_ex.exs <transaction-CBOR-hex>` providing the CBOR hex as its single argument.
+4. Run `elixir submit_tx.exs <transaction-CBOR-hex>` providing the CBOR hex as its single argument.
 
 A successful submission should return the transaction ID. This ID can be used to check the status of the transaction on any Cardano blockchain explorer.
 
