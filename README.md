@@ -7,7 +7,7 @@ Elixir client for Cardano's Ouroboros networking protocol.
 
 ⚠️ This project is under active development. For a more stable solution to connect to a Cardano node using Elixir, see [Xogmios](https://github.com/wowica/xogmios).
 
-## Mini-Protocols supported by this library:
+## Mini-Protocols currently supported by this library:
 
 - [x] Tx Submission
 - [x] Local State Query
@@ -15,7 +15,7 @@ Elixir client for Cardano's Ouroboros networking protocol.
   - get_current_era
   - get_current_block_height
   - get_current_tip
-- [] Chain-Sync
+- [ ] Chain-Sync
 
 ## Quickstart
 

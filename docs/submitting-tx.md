@@ -16,7 +16,7 @@ This assumes you have Elixir installed. In order to run the script directly, fol
     - `Config.default_config!(socket_path, :preview)` for Preview network
 4. Run `elixir submit_ex.exs <transaction-CBOR-hex>` providing the CBOR hex as its single argument.
 
-A successful submission should include the transaction ID. This ID can be used to check the status of the transaction on any Cardano blockchain explorer.
+A successful submission should return the transaction ID. This ID can be used to check the status of the transaction on any Cardano blockchain explorer.
 
 ## Using Docker
 
@@ -41,4 +41,4 @@ docker run --rm \
   xander elixir submit_tx.exs <transaction-CBOR-hex>
 ```
 
-A successful submission should include the transaction ID. This ID can be used to check the status of the transaction on any Cardano blockchain explorer.
+A successful submission should return the transaction ID. This ID can be used to check the status of the transaction on any Cardano blockchain explorer.
