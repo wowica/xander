@@ -15,7 +15,7 @@ alias Xander.Config
 alias Xander.Query
 
 # Default config connects via a local UNIX socket
-config = Config.default_config!(socket_path)
+config = Config.default_config!(socket_path, :preview)
 
 queries = [
   :get_epoch_number,

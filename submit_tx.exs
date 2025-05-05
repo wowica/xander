@@ -11,6 +11,16 @@ if !File.exists?(socket_path) do
   System.halt(1)
 end
 
+tx_hex =
+  case System.argv() do
+    [hex] ->
+      hex
+
+    _ ->
+      IO.puts("Error: Please provide a valid transaction CBOR hex as an argument")
+      System.halt(1)
+  end
+
 alias Xander.Config
 alias Xander.Transaction
 
@@ -20,8 +30,6 @@ config = Config.default_config!(socket_path, :preview)
 case Transaction.start_link(config) do
   {:ok, pid} ->
     IO.puts("Successfully connected to Cardano node 🎉\n")
-
-    tx_hex = ""
 
     case Transaction.send(pid, tx_hex) do
       {:accepted, tx_id} -> IO.puts("\nTransaction submitted successfully ✅\nTx ID: #{tx_id}")
