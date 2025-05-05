@@ -20,7 +20,7 @@ More information on connection below:
 Run the following command using your own Cardano node's socket path:
 
 ```bash
-CARDANO_NODE_PATH=/your/cardano/node.socket elixir run.exs
+CARDANO_NODE_PATH=/your/cardano/node.socket elixir run_queries.exs
 ```
 
 ##### Setting up Unix socket mapping (optional when no direct access to Cardano node)

@@ -20,7 +20,7 @@ the container's default socket path (`/tmp/cardano-node.socket`):
 ```
 docker run --rm \
   -v /your/local/node.socket:/tmp/cardano-node.socket \
-  xander elixir run.exs
+  xander elixir run_queries.exs
 ```
 
 #### 2. Connecting to a node at Demeter.run
