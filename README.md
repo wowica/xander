@@ -23,7 +23,7 @@ Below is an example of how to connect to a Cardano node and run a query that ret
 
 ```elixir
 $ iex
-> Mix.install([{:xander, "~> 0.1.0"}])
+> Mix.install([{:xander, "~> 0.2.0"}])
 > # Must be a valid Unix socket path
 > # to a fully synced Cardano node
 > socket_path = "/path/to/cardano-node.socket"
