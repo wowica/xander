@@ -3,7 +3,7 @@ defmodule Xander.MixProject do
 
   @description "An Elixir library for communicating with a Cardano node"
   @source_url "https://github.com/wowica/xander"
-  @version "0.1.1"
+  @version "0.2.0"
 
   def project do
     [

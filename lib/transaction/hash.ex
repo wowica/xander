@@ -6,7 +6,7 @@ defmodule Xander.Transaction.Hash do
   require Logger
 
   @doc """
-  Extracts a transaction ID from a transaction CBOR hex
+  Extracts a transaction ID from a transaction CBOR hex.
   Returns the transaction ID as a string, or nil if there's an error.
 
   ## Examples
