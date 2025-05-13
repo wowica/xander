@@ -310,36 +310,50 @@ defmodule Xander.ChainSync do
         case :gen_tcp.recv(socket, payload_length, _timeout = 2_000) do
           {:ok, payload} ->
             case CBOR.decode(payload) do
-              {:ok, decoded, _rest} ->
-                [
-                  2,
-                  %CBOR.Tag{
-                    tag: 24,
-                    value: %CBOR.Tag{
-                      tag: :bytes,
-                      value: header_bytes
-                    }
-                  },
-                  [
-                    [
-                      _tip_slot_number,
-                      %CBOR.Tag{
+              {:ok, decoded_payload, _rest} ->
+                case decoded_payload do
+                  # msgRollForward - [2, header, tip]
+                  [2, header, tip] ->
+                    %CBOR.Tag{
+                      tag: 24,
+                      value: %CBOR.Tag{
                         tag: :bytes,
-                        value: _tip_block_hash
+                        value: header_bytes
                       }
-                    ],
-                    _tip_block_height
-                  ]
-                ] = decoded
+                    } = header
 
-                {:ok, [_idk_what_this_is, [[[block_number | _] | _] | _] | _signature], _rest} =
-                  CBOR.decode(header_bytes)
+                    [[_tip_slot_number, block_payload], _tip_block_height] = tip
 
-                # This is the callback from the client module
-                handle_block(socket, client_module, block_number, header_bytes, state, counter)
+                    %CBOR.Tag{
+                      tag: :bytes,
+                      value: _tip_block_hash
+                    } = block_payload
+
+                    IO.puts("Received block")
+
+                    {:ok, [_idk_what_this_is, [[[block_number | _] | _] | _] | _signature], _rest} =
+                      CBOR.decode(header_bytes)
+
+                    # This is the callback from the client module
+                    handle_block(
+                      socket,
+                      client_module,
+                      block_number,
+                      header_bytes,
+                      state,
+                      counter
+                    )
+
+                  # msgAwaitReply - [1]
+                  [1] ->
+                    IO.puts("Awaiting reply")
+
+                  _ ->
+                    IO.puts("Unknown message")
+                end
 
               {:error, _} ->
-                # IO.puts("need to check for msgAwait 1")
+                IO.puts("need to check for msgAwait 1")
                 # If decoding fails, try to read another message
                 read_next_message_continue(socket, payload, counter, client_module, state)
             end
