@@ -138,7 +138,7 @@ defmodule Xander.ChainSync do
 
     case :gen_tcp.recv(socket, 0, _timeout = 5_000) do
       {:ok, intersection_response} ->
-        {:ok, response, ""} = Response.parse_response(intersection_response)
+        {:ok, response} = Response.parse_response(intersection_response)
 
         case response do
           [
