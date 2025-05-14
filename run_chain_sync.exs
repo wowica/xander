@@ -1,5 +1,6 @@
 # Install Xander from local path
 Mix.install([
+  {:blake2, "~> 1.0"},
   {:xander, path: Path.expand(".")},
   {:telemetry, "~> 1.0"}
 ])
@@ -26,23 +27,23 @@ defmodule FollowDaChain do
   use Xander.ChainSync
 
   def start_link(opts) do
-    initial_state = [sync_from: :conway]
+    initial_state = [
+      sync_from: {155_664_588, "a5686728089ea603070491efd04100fffd838bdf65a882b17587c84079b8fbf1"}
+    ]
+
     opts = Keyword.merge(opts, initial_state)
     Xander.ChainSync.start_link(__MODULE__, opts)
   end
 
   def handle_block(%{block_number: block_number, size: size}, state) do
-    # IO.puts("Block number: #{block_number}, size: #{size}")
-
-    :telemetry.execute(
-      [:xander, :chain_sync, :block_processed],
-      %{
-        timestamp: System.system_time(:millisecond),
-        block_height: block_number
-      }
-    )
-
-    # IO.inspect(state)
+    # :telemetry.execute(
+    #   [:xander, :chain_sync, :block_processed],
+    #   %{
+    #     timestamp: System.system_time(:millisecond),
+    #     block_height: block_number
+    #   }
+    # )
+    IO.puts("block_number: #{block_number}, size: #{size}")
     {:ok, :next_block, state}
   end
 end

@@ -225,9 +225,94 @@ defmodule Xander.ChainSync do
         :start_chain_sync,
         %__MODULE__{socket: socket, client_module: client_module} = data
       ) do
-    request_next(socket, 0, client_module, data.state)
-    {:keep_state, data}
+    IO.puts("starting chainsync")
+    "ok banana" = request_next(socket, 0, client_module, data.state)
+    IO.puts("WAT")
+    :keep_state_and_data
     # Blocking for now. Investigate proper way to proceed from here.
+  end
+
+  def idle(
+        :info,
+        {:tcp, socket, data},
+        %__MODULE__{socket: socket, client_module: client_module, state: state} = module_state
+      ) do
+    IO.puts("handling new block")
+
+    <<_timestamp::big-32, _mode::1, _protocol_id::15, payload_length::big-16, rest::binary>> =
+      data
+
+    case :gen_tcp.recv(socket, payload_length - byte_size(rest), _timeout = 2_000) do
+      {:ok, payload} ->
+        combined_payload = rest <> payload
+
+        case CBOR.decode(combined_payload) do
+          {:ok, decoded_payload, _rest} ->
+            case decoded_payload do
+              # msgRollForward - [2, header, tip]
+              [2, header, tip] ->
+                IO.puts("decoded block perfectly")
+
+                %CBOR.Tag{
+                  tag: 24,
+                  value: %CBOR.Tag{
+                    tag: :bytes,
+                    value: header_bytes
+                  }
+                } = header
+
+                [[_tip_slot_number, block_payload], _tip_block_height] = tip
+
+                %CBOR.Tag{
+                  tag: :bytes,
+                  value: _tip_block_hash
+                } = block_payload
+
+                {:ok, [_idk_what_this_is, [[[block_number | _] | _] | _] | _signature], _rest} =
+                  CBOR.decode(header_bytes)
+
+                case client_module.handle_block(
+                       %{
+                         block_number: block_number,
+                         size: byte_size(header_bytes)
+                       },
+                       state
+                     ) do
+                  {:ok, :next_block, new_state} ->
+                    IO.puts("next block ?")
+                    :ok = :inet.setopts(socket, active: :once)
+                    {:keep_state, %{module_state | state: new_state}}
+
+                  {:ok, :stop} ->
+                    {:next_state, :disconnected, module_state}
+                end
+
+              # msgAwaitReply - [1]
+              [1] ->
+                IO.puts("decoded msgAwaitReply")
+                :ok = :inet.setopts(socket, active: :once)
+                {:keep_state, module_state}
+
+              value ->
+                IO.puts("Didn't decode anything #{inspect(value)}")
+                :keep_state_and_data
+            end
+
+          {:error, _} ->
+            # If decoding fails, try to read another message
+            read_next_message_continue(
+              socket,
+              combined_payload,
+              _possibly_remove_this = 666,
+              client_module,
+              state
+            )
+        end
+
+      {:error, reason} ->
+        IO.puts("Failed to read payload on new block: #{inspect(reason)}")
+        :keep_state_and_data
+    end
   end
 
   ### Helper functions
@@ -298,7 +383,10 @@ defmodule Xander.ChainSync do
     read_next_message(socket, counter, client_module, state)
   end
 
-  defp request_next(_socket, _counter, _client_module, _state), do: :ok
+  defp request_next(_socket, _counter, _client_module, _state) do
+    IO.puts("request next fallback")
+    :ok
+  end
 
   # Helper function to read the next message
   defp read_next_message(socket, counter, client_module, state) do
@@ -329,8 +417,6 @@ defmodule Xander.ChainSync do
                       value: _tip_block_hash
                     } = block_payload
 
-                    IO.puts("Received block")
-
                     {:ok, [_idk_what_this_is, [[[block_number | _] | _] | _] | _signature], _rest} =
                       CBOR.decode(header_bytes)
 
@@ -347,13 +433,14 @@ defmodule Xander.ChainSync do
                   # msgAwaitReply - [1]
                   [1] ->
                     IO.puts("Awaiting reply")
+                    :ok = :inet.setopts(socket, active: :once)
+                    "ok banana"
 
                   _ ->
                     IO.puts("Unknown message")
                 end
 
               {:error, _} ->
-                IO.puts("need to check for msgAwait 1")
                 # If decoding fails, try to read another message
                 read_next_message_continue(socket, payload, counter, client_module, state)
             end
@@ -459,7 +546,7 @@ defmodule Xander.ChainSync do
           id: __MODULE__,
           start: {__MODULE__, :start_link, [opts]},
           type: :worker,
-          restart: :permanent,
+          restart: :temporary,
           shutdown: 5_000
         }
       end
