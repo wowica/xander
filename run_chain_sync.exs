@@ -28,7 +28,7 @@ defmodule FollowDaChain do
 
   def start_link(opts) do
     initial_state = [
-      sync_from: {155_664_588, "a5686728089ea603070491efd04100fffd838bdf65a882b17587c84079b8fbf1"}
+      sync_from: {155_767_673, "9e61fede5d99c60e5353bb3174b4152709ca5b3aa833edc42ab42d61c34528d6"}
     ]
 
     opts = Keyword.merge(opts, initial_state)

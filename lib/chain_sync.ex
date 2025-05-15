@@ -227,9 +227,7 @@ defmodule Xander.ChainSync do
       ) do
     IO.puts("starting chainsync")
     "ok banana" = request_next(socket, 0, client_module, data.state)
-    IO.puts("WAT")
     :keep_state_and_data
-    # Blocking for now. Investigate proper way to proceed from here.
   end
 
   def idle(
@@ -242,8 +240,21 @@ defmodule Xander.ChainSync do
     <<_timestamp::big-32, _mode::1, _protocol_id::15, payload_length::big-16, rest::binary>> =
       data
 
-    case :gen_tcp.recv(socket, payload_length - byte_size(rest), _timeout = 2_000) do
+    remaining_payload_length = payload_length - byte_size(rest)
+
+    # This ensures that if the entire payload has been read sent in data,
+    # we don't try to read anymore.
+    read_remaining_payload = fn
+      0 = _recv_payload_length ->
+        {:ok, rest}
+
+      recv_payload_length ->
+        :gen_tcp.recv(socket, recv_payload_length, _timeout = 2_000)
+    end
+
+    case read_remaining_payload.(remaining_payload_length) do
       {:ok, payload} ->
+        IO.puts("read payload on new block")
         combined_payload = rest <> payload
 
         case CBOR.decode(combined_payload) do
@@ -278,10 +289,23 @@ defmodule Xander.ChainSync do
                        },
                        state
                      ) do
-                  {:ok, :next_block, new_state} ->
+                  {:ok, :next_block, _new_state} ->
                     IO.puts("next block ?")
+                    message = Xander.Messages.next_request()
+                    :ok = :gen_tcp.send(socket, message)
+                    {:ok, header_bytes} = :gen_tcp.recv(socket, 8, _timeout = 2_000)
+
+                    <<_timestamp::big-32, _mode::1, _protocol_id::15, payload_length::big-16>> =
+                      header_bytes
+
+                    {:ok, payload} = :gen_tcp.recv(socket, payload_length, _timeout = 2_000)
+                    {:ok, decoded_payload, _rest} = CBOR.decode(payload)
+                    # Response should always be [1] msgAwaitReply
+                    IO.inspect(decoded_payload)
+                    IO.puts("decoded msgAwaitReply")
                     :ok = :inet.setopts(socket, active: :once)
-                    {:keep_state, %{module_state | state: new_state}}
+
+                    :keep_state_and_data
 
                   {:ok, :stop} ->
                     {:next_state, :disconnected, module_state}
@@ -307,6 +331,8 @@ defmodule Xander.ChainSync do
               client_module,
               state
             )
+
+            :keep_state_and_data
         end
 
       {:error, reason} ->
