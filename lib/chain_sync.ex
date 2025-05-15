@@ -341,35 +341,6 @@ defmodule Xander.ChainSync do
     end
   end
 
-  ### Helper functions
-
-  defp maybe_local_path(path, :socket), do: {:local, path}
-  defp maybe_local_path(path, _), do: path
-
-  defp maybe_local_port(_port, :socket), do: 0
-  defp maybe_local_port(port, _), do: port
-
-  defp maybe_parse_path(path) when is_binary(path) do
-    uri = URI.parse(path)
-    ~c"#{uri.host}"
-  end
-
-  defp maybe_parse_path(path), do: path
-
-  defp tcp_lib(:ssl), do: :ssl
-  defp tcp_lib(_), do: :gen_tcp
-
-  defp tcp_opts(:ssl, path),
-    do:
-      @basic_tcp_opts ++
-        [
-          verify: :verify_none,
-          server_name_indication: ~c"#{path}",
-          secure_renegotiate: true
-        ]
-
-  defp tcp_opts(_, _), do: @basic_tcp_opts
-
   defp request_next(socket, 0, client_module, state) do
     message = Xander.Messages.next_request()
     :ok = :gen_tcp.send(socket, message)
@@ -564,6 +535,35 @@ defmodule Xander.ChainSync do
         {:error, reason}
     end
   end
+
+  ### Helper functions
+
+  defp maybe_local_path(path, :socket), do: {:local, path}
+  defp maybe_local_path(path, _), do: path
+
+  defp maybe_local_port(_port, :socket), do: 0
+  defp maybe_local_port(port, _), do: port
+
+  defp maybe_parse_path(path) when is_binary(path) do
+    uri = URI.parse(path)
+    ~c"#{uri.host}"
+  end
+
+  defp maybe_parse_path(path), do: path
+
+  defp tcp_lib(:ssl), do: :ssl
+  defp tcp_lib(_), do: :gen_tcp
+
+  defp tcp_opts(:ssl, path),
+    do:
+      @basic_tcp_opts ++
+        [
+          verify: :verify_none,
+          server_name_indication: ~c"#{path}",
+          secure_renegotiate: true
+        ]
+
+  defp tcp_opts(_, _), do: @basic_tcp_opts
 
   defmacro __using__(_opts) do
     quote do
