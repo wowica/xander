@@ -228,7 +228,7 @@ defmodule Xander.ChainSync do
         %__MODULE__{socket: socket, client_module: client_module} = data
       ) do
     Logger.debug("starting chainsync")
-    "ok banana" = request_next(socket, 0, client_module, data.state)
+    "ok banana" = start_chain_sync(socket, 0, client_module, data.state)
     :keep_state_and_data
   end
 
@@ -377,49 +377,53 @@ defmodule Xander.ChainSync do
     end
   end
 
-  defp request_next(socket, 0, client_module, state) do
+  # As part of the chainsync process, this function emits msgRequestNext
+  # and waits for a subsequent msgRollbackward
+  defp start_chain_sync(socket, 0, client_module, state) do
     message = Xander.Messages.next_request()
     :ok = :gen_tcp.send(socket, message)
+    {:ok, header_bytes} = :gen_tcp.recv(socket, 8, _timeout = 2_000)
+    <<_timestamp::big-32, _mode::1, _protocol_id::15, payload_length::big-16>> = header_bytes
 
-    case :gen_tcp.recv(socket, 0, _timeout = 2_000) do
-      {:ok, response} ->
-        <<_transmission_time::big-32, _protocol_id_with_mode::big-16, _payload_length::big-16,
-          payload::binary>> = response
-
+    case :gen_tcp.recv(socket, payload_length, _timeout = 2_000) do
+      {:ok, payload} ->
         case CBOR.decode(payload) do
-          {:ok, [3, point, _tip], _rest} ->
+          {:ok, [3, point, _tip] = _msgRollbackward, _rest} ->
             [slot_number, %CBOR.Tag{tag: :bytes, value: block_hash}] = point
 
             Logger.debug(
-              "Rollback to (#{slot_number}, #{Base.encode16(block_hash, case: :lower)})"
+              "Rolling back to (#{slot_number}, #{Base.encode16(block_hash, case: :lower)})"
             )
 
-          {:ok, _content, _rest} ->
-            Logger.debug("Next request response successful")
+            message = Xander.Messages.next_request()
+            :ok = :gen_tcp.send(socket, message)
+
+            # Read the next message
+            read_next_message(socket, 0, client_module, state)
+
+          {:ok, unknown_response, _rest} ->
+            Logger.warning(
+              "Unknown response. Expected msgRollbackward but received: #{inspect(unknown_response)}"
+            )
+
+            :keep_state_and_data
         end
 
-        message = Xander.Messages.next_request()
-        Logger.debug("Sending next request 1")
-        :ok = :gen_tcp.send(socket, message)
-
-        # Read the next message
-        read_next_message(socket, 0, client_module, state)
-
       {:error, reason} ->
-        Logger.debug("Response 1 failed: #{inspect(reason)}")
+        Logger.warning("Error reading socket: #{inspect(reason)}")
         {:error, reason}
     end
   end
 
   # Randomly picked 1000 to run chainsync for awhile.
   # The idea is for this to eventually run indefinitely.
-  defp request_next(socket, counter, client_module, state) when counter < 1000 do
+  defp start_chain_sync(socket, counter, client_module, state) when counter < 1000 do
     message = Xander.Messages.next_request()
     :ok = :gen_tcp.send(socket, message)
     read_next_message(socket, counter, client_module, state)
   end
 
-  defp request_next(_socket, _counter, _client_module, _state) do
+  defp start_chain_sync(_socket, _counter, _client_module, _state) do
     Logger.debug("request next fallback")
     :ok
   end
@@ -501,7 +505,7 @@ defmodule Xander.ChainSync do
            state
          ) do
       {:ok, :next_block, _new_state} ->
-        request_next(socket, counter + 1, client_module, 666)
+        start_chain_sync(socket, counter + 1, client_module, 666)
 
       {:ok, :stop} ->
         :ok
