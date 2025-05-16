@@ -153,6 +153,22 @@ defmodule Xander.Messages do
     header(@mini_protocols.local_tx_submission, bitstring_payload) <> bitstring_payload
   end
 
+  def next_request() do
+    bitstring_payload = CBOR.encode([0])
+    header(@mini_protocols.chain_sync, bitstring_payload) <> bitstring_payload
+  end
+
+  # Must be called second on ChainSync
+  def find_intersection(slot_no, block_hash) do
+    points = [
+      [slot_no, %CBOR.Tag{tag: :bytes, value: block_hash}]
+    ]
+
+    bitstring_payload = CBOR.encode([4, points])
+
+    header(@mini_protocols.chain_sync, bitstring_payload) <> bitstring_payload
+  end
+
   defp build_query(query), do: [@message_query, query]
 
   defp build_transaction(tx_binary) do
