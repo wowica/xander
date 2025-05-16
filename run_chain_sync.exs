@@ -28,7 +28,7 @@ defmodule FollowDaChain do
 
   def start_link(opts) do
     initial_state = [
-      sync_from: {155_767_673, "9e61fede5d99c60e5353bb3174b4152709ca5b3aa833edc42ab42d61c34528d6"}
+      sync_from: {155_862_951, "7e81c389c4843050b90bcd1cd449fdd55d7c364eb7a9be9aac9394a0329fe6a7"}
     ]
 
     opts = Keyword.merge(opts, initial_state)
@@ -44,6 +44,11 @@ defmodule FollowDaChain do
     #   }
     # )
     IO.puts("block_number: #{block_number}, size: #{size}")
+    {:ok, :next_block, state}
+  end
+
+  def handle_rollback(%{slot_number: slot_number, block_hash: block_hash}, state) do
+    IO.puts("Rollback to Slot: #{slot_number}, Block Hash: #{block_hash}")
     {:ok, :next_block, state}
   end
 end

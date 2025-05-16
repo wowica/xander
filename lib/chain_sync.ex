@@ -4,7 +4,10 @@ defmodule Xander.ChainSync do
   @basic_tcp_opts [:binary, active: false, send_timeout: 4_000]
   @active_n2c_versions [9, 10, 11, 12, 13, 14, 15, 16]
 
-  alias Xander.ChainSync.Response
+  alias Xander.ChainSync.Response, as: CSResponse
+  # Investigate possibly extracting Handshake into a separate state machine.
+  alias Xander.Handshake.Proposal
+  alias Xander.Handshake.Response, as: HSResponse
 
   require Logger
 
@@ -101,30 +104,29 @@ defmodule Xander.ChainSync do
       ) do
     Logger.info("Establishing handshake...")
 
-    :ok =
-      client.send(
-        socket,
-        Xander.Handshake.Proposal.version_message(@active_n2c_versions, network)
-      )
-
-    case client.recv(socket, 0, _timeout = 5_000) do
-      {:ok, full_response} ->
-        case Xander.Handshake.Response.validate(full_response) do
-          {:ok, _handshake_response} ->
-            # Transitions to idle state
-            Logger.info("Handshake successful")
-            actions = [{:next_event, :internal, :find_intersection}]
-            {:next_state, :idle, data, actions}
-
-          {:refused, response} ->
-            Logger.error("Handshake refused by node. Response: #{inspect(response)}")
-
-            {:next_state, :disconnected, data}
-        end
+    case propose_handshake(client, socket, network) do
+      {:ok, _handshake_response} ->
+        Logger.info("Handshake successful")
+        actions = [{:next_event, :internal, :find_intersection}]
+        {:next_state, :idle, data, actions}
 
       {:error, reason} ->
-        Logger.error("Error establishing connection #{inspect(reason)}")
+        Logger.error("Error establishing handshake: #{inspect(reason)}")
         {:next_state, :disconnected, data}
+    end
+  end
+
+  defp propose_handshake(client, socket, network) do
+    with :ok <- client.send(socket, Proposal.version_message(@active_n2c_versions, network)),
+         {:ok, full_response} <- client.recv(socket, 0, _timeout = 5_000),
+         {:ok, handshake_response} <- HSResponse.validate(full_response) do
+      {:ok, handshake_response}
+    else
+      {:refused, response} ->
+        {:error, response}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -138,7 +140,7 @@ defmodule Xander.ChainSync do
 
     case :gen_tcp.recv(socket, 0, _timeout = 5_000) do
       {:ok, intersection_response} ->
-        {:ok, response} = Response.parse_response(intersection_response)
+        {:ok, response} = CSResponse.parse_response(intersection_response)
 
         case response do
           [
@@ -290,7 +292,7 @@ defmodule Xander.ChainSync do
                        state
                      ) do
                   {:ok, :next_block, _new_state} ->
-                    IO.puts("next block ?")
+                    IO.puts("gimme next block")
                     message = Xander.Messages.next_request()
                     :ok = :gen_tcp.send(socket, message)
                     {:ok, header_bytes} = :gen_tcp.recv(socket, 8, _timeout = 2_000)
@@ -317,9 +319,40 @@ defmodule Xander.ChainSync do
                 :ok = :inet.setopts(socket, active: :once)
                 {:keep_state, module_state}
 
-              value ->
-                IO.puts("Didn't decode anything #{inspect(value)}")
-                :keep_state_and_data
+              # msgRollBackward - [3, point, tip]
+              [3, point, _tip] ->
+                # TODO: should we find another intersection point ?
+                [
+                  rollback_slot_number,
+                  %CBOR.Tag{tag: :bytes, value: rollback_block_hash_bytes}
+                ] = point
+
+                rollback_block_hash_hex = Base.encode16(rollback_block_hash_bytes, case: :lower)
+
+                IO.puts(
+                  "Calling client_module.handle_rollback with #{rollback_slot_number}, #{rollback_block_hash_hex}"
+                )
+
+                case client_module.handle_rollback(
+                       %{
+                         slot_number: rollback_slot_number,
+                         block_hash: rollback_block_hash_hex
+                       },
+                       state
+                     ) do
+                  {:ok, :next_block, _new_state} ->
+                    IO.puts("next block after rollback")
+                    message = Xander.Messages.next_request()
+                    :ok = :gen_tcp.send(socket, message)
+                    :ok = :inet.setopts(socket, active: :once)
+                    :keep_state_and_data
+
+                  {:ok, :stop} ->
+                    {:next_state, :disconnected, module_state}
+                end
+
+              unknown_response ->
+                IO.puts("Unknown message: #{inspect(unknown_response)}")
             end
 
           {:error, _} ->
