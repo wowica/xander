@@ -5,6 +5,9 @@ Mix.install([
   {:telemetry, "~> 1.0"}
 ])
 
+logger_level = System.get_env("LOGGER_LEVEL", "warning")
+Logger.configure(level: String.to_atom(logger_level))
+
 defmodule IndexState do
   use Agent
 

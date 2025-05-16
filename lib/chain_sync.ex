@@ -69,7 +69,7 @@ defmodule Xander.ChainSync do
         :connect,
         %__MODULE__{client: client, path: path, port: port} = data
       ) do
-    Logger.info("Connecting to #{inspect(path)}")
+    Logger.debug("Connecting to #{inspect(path)}")
 
     case client.connect(
            maybe_parse_path(path),
@@ -77,7 +77,7 @@ defmodule Xander.ChainSync do
            tcp_opts(client, path)
          ) do
       {:ok, socket} ->
-        Logger.info("Connected to #{inspect(path)}")
+        Logger.debug("Connected to #{inspect(path)}")
         data = %__MODULE__{data | socket: socket}
         actions = [{:next_event, :internal, :establish}]
         {:next_state, :connected, data, actions}
@@ -102,11 +102,11 @@ defmodule Xander.ChainSync do
           network: network
         } = data
       ) do
-    Logger.info("Establishing handshake...")
+    Logger.debug("Establishing handshake...")
 
     case propose_handshake(client, socket, network) do
       {:ok, _handshake_response} ->
-        Logger.info("Handshake successful")
+        Logger.debug("Handshake successful")
         actions = [{:next_event, :internal, :find_intersection}]
         {:next_state, :idle, data, actions}
 
@@ -149,7 +149,7 @@ defmodule Xander.ChainSync do
             [[tip_slot_no, %CBOR.Tag{tag: :bytes, value: tip_block_hash}], _block_no]
           ] ->
             tip_block_hash_hex = Base.encode16(tip_block_hash, case: :lower)
-            IO.puts("First rollback: (#{tip_slot_no}, #{tip_block_hash_hex}")
+            Logger.debug("First rollback: (#{tip_slot_no}, #{tip_block_hash_hex}")
 
             {slot_number, block_hash_hex} =
               case sync_from do
@@ -162,7 +162,7 @@ defmodule Xander.ChainSync do
                   {slot_number, block_hash}
 
                 _ ->
-                  IO.puts("Sync to")
+                  Logger.debug("Sync to tip")
                   {tip_slot_no, tip_block_hash_hex}
               end
 
@@ -173,7 +173,7 @@ defmodule Xander.ChainSync do
 
             case :gen_tcp.recv(socket, 0, _timeout = 5_000) do
               {:ok, intersection_response} ->
-                IO.puts("Find intersection response successful")
+                Logger.debug("Find intersection response successful")
 
                 <<_transmission_time::big-32, _protocol_id_with_mode::big-16,
                   _payload_length::big-16, payload::binary>> = intersection_response
@@ -194,12 +194,12 @@ defmodule Xander.ChainSync do
                        _tip_block_height
                      ]
                    ], ""} ->
-                    IO.puts(
+                    Logger.debug(
                       "Intersection point is (#{slot_number}, #{Base.encode16(block_hash_bytes, case: :lower)})"
                     )
 
                   {:error, _error} ->
-                    IO.puts("Intersection not found")
+                    Logger.debug("Intersection not found")
                 end
 
                 # Start the actual chainsync messages
@@ -207,17 +207,17 @@ defmodule Xander.ChainSync do
                 {:keep_state, data, actions}
 
               {:error, reason} ->
-                IO.puts("Find intersection response failed: #{inspect(reason)}")
+                Logger.debug("Find intersection response failed: #{inspect(reason)}")
                 {:next_state, :disconnected, data}
             end
 
           _ ->
-            IO.puts("Next request response failed: #{inspect(response)}")
+            Logger.debug("Next request response failed: #{inspect(response)}")
             {:next_state, :disconnected, data}
         end
 
       {:error, reason} ->
-        IO.puts("Next request response failed: #{inspect(reason)}")
+        Logger.debug("Next request response failed: #{inspect(reason)}")
         {:next_state, :disconnected, data}
     end
   end
@@ -227,7 +227,7 @@ defmodule Xander.ChainSync do
         :start_chain_sync,
         %__MODULE__{socket: socket, client_module: client_module} = data
       ) do
-    IO.puts("starting chainsync")
+    Logger.debug("starting chainsync")
     "ok banana" = request_next(socket, 0, client_module, data.state)
     :keep_state_and_data
   end
@@ -237,7 +237,7 @@ defmodule Xander.ChainSync do
         {:tcp, socket, data},
         %__MODULE__{socket: socket, client_module: client_module, state: state} = module_state
       ) do
-    IO.puts("handling new block")
+    Logger.debug("handling new block")
 
     <<_timestamp::big-32, _mode::1, _protocol_id::15, payload_length::big-16, rest::binary>> =
       data
@@ -256,7 +256,7 @@ defmodule Xander.ChainSync do
 
     case read_remaining_payload.(remaining_payload_length) do
       {:ok, payload} ->
-        IO.puts("read payload on new block")
+        Logger.debug("read payload on new block")
         combined_payload = rest <> payload
 
         case CBOR.decode(combined_payload) do
@@ -264,7 +264,7 @@ defmodule Xander.ChainSync do
             case decoded_payload do
               # msgRollForward - [2, header, tip]
               [2, header, tip] ->
-                IO.puts("decoded block perfectly")
+                Logger.debug("decoded block perfectly")
 
                 %CBOR.Tag{
                   tag: 24,
@@ -292,7 +292,6 @@ defmodule Xander.ChainSync do
                        state
                      ) do
                   {:ok, :next_block, _new_state} ->
-                    IO.puts("gimme next block")
                     message = Xander.Messages.next_request()
                     :ok = :gen_tcp.send(socket, message)
                     {:ok, header_bytes} = :gen_tcp.recv(socket, 8, _timeout = 2_000)
@@ -301,13 +300,17 @@ defmodule Xander.ChainSync do
                       header_bytes
 
                     {:ok, payload} = :gen_tcp.recv(socket, payload_length, _timeout = 2_000)
-                    {:ok, decoded_payload, _rest} = CBOR.decode(payload)
-                    # Response should always be [1] msgAwaitReply
-                    IO.inspect(decoded_payload)
-                    IO.puts("decoded msgAwaitReply")
-                    :ok = :inet.setopts(socket, active: :once)
 
-                    :keep_state_and_data
+                    case CBOR.decode(payload) do
+                      {:ok, [1], _rest} ->
+                        # Response should always be [1] msgAwaitReply
+                        :ok = :inet.setopts(socket, active: :once)
+                        :keep_state_and_data
+
+                      {:ok, decoded_payload, _rest} ->
+                        Logger.warning("Unknown message: #{inspect(decoded_payload)}")
+                        :keep_state_and_data
+                    end
 
                   {:ok, :stop} ->
                     {:next_state, :disconnected, module_state}
@@ -315,7 +318,7 @@ defmodule Xander.ChainSync do
 
               # msgAwaitReply - [1]
               [1] ->
-                IO.puts("decoded msgAwaitReply")
+                Logger.debug("decoded msgAwaitReply")
                 :ok = :inet.setopts(socket, active: :once)
                 {:keep_state, module_state}
 
@@ -329,7 +332,7 @@ defmodule Xander.ChainSync do
 
                 rollback_block_hash_hex = Base.encode16(rollback_block_hash_bytes, case: :lower)
 
-                IO.puts(
+                Logger.debug(
                   "Calling client_module.handle_rollback with #{rollback_slot_number}, #{rollback_block_hash_hex}"
                 )
 
@@ -341,7 +344,7 @@ defmodule Xander.ChainSync do
                        state
                      ) do
                   {:ok, :next_block, _new_state} ->
-                    IO.puts("next block after rollback")
+                    Logger.debug("next block after rollback")
                     message = Xander.Messages.next_request()
                     :ok = :gen_tcp.send(socket, message)
                     :ok = :inet.setopts(socket, active: :once)
@@ -352,7 +355,7 @@ defmodule Xander.ChainSync do
                 end
 
               unknown_response ->
-                IO.puts("Unknown message: #{inspect(unknown_response)}")
+                Logger.debug("Unknown message: #{inspect(unknown_response)}")
             end
 
           {:error, _} ->
@@ -369,7 +372,7 @@ defmodule Xander.ChainSync do
         end
 
       {:error, reason} ->
-        IO.puts("Failed to read payload on new block: #{inspect(reason)}")
+        Logger.debug("Failed to read payload on new block: #{inspect(reason)}")
         :keep_state_and_data
     end
   end
@@ -386,21 +389,24 @@ defmodule Xander.ChainSync do
         case CBOR.decode(payload) do
           {:ok, [3, point, _tip], _rest} ->
             [slot_number, %CBOR.Tag{tag: :bytes, value: block_hash}] = point
-            IO.puts("Rollback to (#{slot_number}, #{Base.encode16(block_hash, case: :lower)})")
+
+            Logger.debug(
+              "Rollback to (#{slot_number}, #{Base.encode16(block_hash, case: :lower)})"
+            )
 
           {:ok, _content, _rest} ->
-            IO.puts("Next request response successful")
+            Logger.debug("Next request response successful")
         end
 
         message = Xander.Messages.next_request()
-        IO.puts("Sending next request 1")
+        Logger.debug("Sending next request 1")
         :ok = :gen_tcp.send(socket, message)
 
         # Read the next message
         read_next_message(socket, 0, client_module, state)
 
       {:error, reason} ->
-        IO.puts("Response 1 failed: #{inspect(reason)}")
+        Logger.debug("Response 1 failed: #{inspect(reason)}")
         {:error, reason}
     end
   end
@@ -414,7 +420,7 @@ defmodule Xander.ChainSync do
   end
 
   defp request_next(_socket, _counter, _client_module, _state) do
-    IO.puts("request next fallback")
+    Logger.debug("request next fallback")
     :ok
   end
 
@@ -462,12 +468,12 @@ defmodule Xander.ChainSync do
 
                   # msgAwaitReply - [1]
                   [1] ->
-                    IO.puts("Awaiting reply")
+                    Logger.debug("Awaiting reply")
                     :ok = :inet.setopts(socket, active: :once)
                     "ok banana"
 
                   _ ->
-                    IO.puts("Unknown message")
+                    Logger.debug("Unknown message")
                 end
 
               {:error, _} ->
@@ -476,12 +482,12 @@ defmodule Xander.ChainSync do
             end
 
           {:error, reason} ->
-            IO.puts("Failed to read payload: #{inspect(reason)}")
+            Logger.debug("Failed to read payload: #{inspect(reason)}")
             {:error, reason}
         end
 
       {:error, reason} ->
-        IO.puts("Failed to read header: #{inspect(reason)}")
+        Logger.debug("Failed to read header: #{inspect(reason)}")
         {:error, reason}
     end
   end
@@ -541,12 +547,12 @@ defmodule Xander.ChainSync do
                 {:ok, [_idk_what_this_is, [[[block_number | _] | _] | _] | _signature], _rest} =
                   CBOR.decode(header_bytes)
 
-                # IO.puts("rolling forward #{block_number}, block size: #{byte_size(header_bytes)}")
+                # Logger.debug("rolling forward #{block_number}, block size: #{byte_size(header_bytes)}")
                 handle_block(socket, client_module, block_number, header_bytes, state, counter)
 
               {:error, _reason} ->
-                # IO.puts("need to check for msgAwait 2")
-                # IO.puts("Failed to decode combined payload: #{inspect(reason)}")
+                # Logger.debug("need to check for msgAwait 2")
+                # Logger.debug("Failed to decode combined payload: #{inspect(reason)}")
                 read_next_message_continue(
                   socket,
                   combined_payload,
@@ -559,12 +565,12 @@ defmodule Xander.ChainSync do
             end
 
           {:error, reason} ->
-            IO.puts("Failed to read second payload: #{inspect(reason)}")
+            Logger.debug("Failed to read second payload: #{inspect(reason)}")
             {:error, reason}
         end
 
       {:error, reason} ->
-        IO.puts("Failed to read second header: #{inspect(reason)}")
+        Logger.debug("Failed to read second header: #{inspect(reason)}")
         {:error, reason}
     end
   end
