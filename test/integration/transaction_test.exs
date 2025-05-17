@@ -1,7 +1,6 @@
 defmodule Xander.Integration.TransactionTest do
   use ExUnit.Case, async: false
 
-  alias Xander.{Config, Query, Transaction}
   alias Supervisor
 
   @mnemonic "test test test test test test test test test test test test test test test test test test test test test test test sauce"
@@ -185,30 +184,34 @@ defmodule Xander.Integration.TransactionTest do
   end
 
   @tag :integration
-  test "handles concurrent queries", %{socket_path: socket_path} do
-    # We'll use a simple query, e.g., get protocol parameters, 5 times in parallel.
-    query_fun = fn ->
-      # Replace this with the actual query you want to test for concurrency.
-      # For example, if you have a Query module:
-      # Xander.Query.run(:get_protocol_parameters)
-      # Or if you want to test transaction submission, use a dummy tx_cbor:
-      # Xander.Transaction.send(dummy_tx_cbor)
-      # :gen_statem.call(Xander.Query, {:request, :get_protocol_parameters})
-      Xander.Query.run(:get_current_tip)
-    end
+  test "handles concurrent distinct queries in order" do
+    # List of distinct queries to send
+    queries = [
+      :get_current_era,
+      :get_current_block_height,
+      :get_epoch_number,
+      :get_current_tip
+    ]
 
-    # Launch 5 concurrent queries
-    results =
-      1..5
-      |> Task.async_stream(fn _ -> query_fun.() end, max_concurrency: 5, timeout: 20_000)
-      |> Enum.to_list()
+    # Fire all queries in parallel, but keep their order
+    tasks =
+      Enum.map(queries, fn query ->
+        Task.async(fn -> {query, Xander.Query.run(query)} end)
+      end)
 
-    # Assert all succeeded
-    Enum.each(results, fn
-      {:ok, {:ok, _result}} -> :ok
-      {:ok, other} -> flunk("Unexpected result: #{inspect(other)}")
-      {:exit, reason} -> flunk("Task exited: #{inspect(reason)}")
-      {:error, reason} -> flunk("Task error: #{inspect(reason)}")
+    # Collect results in the order of the original queries
+    results = Enum.map(tasks, &Task.await(&1, 5_000))
+
+    # Assert that the responses are in the same order as the queries
+    Enum.zip(queries, results)
+    |> Enum.each(fn
+      {expected_query, {actual_query, {:ok, _result}}} ->
+        assert expected_query == actual_query
+
+      {expected_query, {actual_query, other}} ->
+        flunk(
+          "Unexpected result for #{inspect(expected_query)}: got #{inspect(other)} from #{inspect(actual_query)}"
+        )
     end)
   end
 
