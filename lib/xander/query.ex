@@ -191,6 +191,17 @@ defmodule Xander.Query do
   def established_has_agency(_event_type, _event_content, _data)
 
   def established_has_agency(
+        {:call, from},
+        {:request, request},
+        %__MODULE__{queue: queue} = data
+      ) do
+    # Enqueue the new request (from is usually {pid, ref})
+    new_queue = :queue.in({from, request}, queue)
+    new_data = %{data | queue: new_queue}
+    {:keep_state, new_data}
+  end
+
+  def established_has_agency(
         :internal,
         :send_query,
         %__MODULE__{client: client, socket: socket} = data
@@ -198,14 +209,20 @@ defmodule Xander.Query do
     # Get the current query_name from queue without removing it
     {:value, {_from, query_name}} = :queue.peek(data.queue)
 
+    # Set socket to active mode so we can receive the next response
+    :ok = setopts_lib(client).setopts(socket, active: :once)
+
     # Send query to node and remain in established_has_agency state
     :ok = client.send(socket, build_query_message(query_name))
     {:keep_state, data}
   end
 
   # This function is invoked due to the socket being set to active mode.
-  # It receives a response from the node, sends a release message and
-  # then transitions back to the established_no_agency state.
+  # It receives a response from the node, processes the next query in the
+  # queue, and either keeps or transitions its state depending on if the
+  # queue is empty or not. More queries may be added to the queue while
+  # in this state if they arrive in the process mailbox before the queue
+  # is emptied.
   def established_has_agency(
         :info,
         {_tcp_or_ssl, socket, bytes},
@@ -214,21 +231,11 @@ defmodule Xander.Query do
     # Parse query response (MsgResult)
     case Response.parse_response(bytes) do
       {:ok, query_response} ->
-        # Get the caller from our queue
-        {{:value, {caller, _query_name}}, new_data} = get_and_update_in(data.queue, &:queue.out/1)
-
-        # Send release message to transition back to StIdle
-        :ok = client.send(socket, Messages.msg_release())
-
-        # Reply to caller and transition back to established_no_agency (StIdle)
-        actions = [{:reply, caller, {:ok, query_response}}]
-        {:next_state, :established_no_agency, new_data, actions}
+        handle_query_result({:ok, query_response}, data, client, socket)
 
       {:error, reason} ->
         Logger.error("Failed to parse response: #{inspect(reason)}")
-        {{:value, {caller, _query_name}}, new_data} = get_and_update_in(data.queue, &:queue.out/1)
-        actions = [{:reply, caller, {:error, :parse_failed}}]
-        {:next_state, :established_no_agency, new_data, actions}
+        handle_query_result({:error, :parse_failed}, data, client, socket)
     end
   end
 
@@ -248,6 +255,26 @@ defmodule Xander.Query do
       :get_current_block_height -> Messages.get_current_block_height()
       :get_epoch_number -> Messages.get_epoch_number()
       :get_current_tip -> Messages.get_current_tip()
+    end
+  end
+
+  defp handle_query_result(result, data, client, socket) do
+    case :queue.out(data.queue) do
+      {{:value, {caller, _query_name}}, rest_queue} ->
+        actions = [{:reply, caller, result}]
+
+        if :queue.is_empty(rest_queue) do
+          :ok = client.send(socket, Messages.msg_release())
+          new_data = %{data | queue: rest_queue}
+          {:next_state, :established_no_agency, new_data, actions}
+        else
+          new_data = %{data | queue: rest_queue}
+          {:keep_state, new_data, actions ++ [{:next_event, :internal, :send_query}]}
+        end
+
+      {:empty, _} ->
+        :ok = client.send(socket, Messages.msg_release())
+        {:next_state, :established_no_agency, data, []}
     end
   end
 

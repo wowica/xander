@@ -163,7 +163,7 @@ defmodule Xander.Integration.TransactionTest do
     # Start the supervisor with Xander.Transaction as a child
     {:ok, supervisor_pid} =
       Supervisor.start_link(
-        [{Xander.Transaction, opts}],
+        [{Xander.Query, opts}, {Xander.Transaction, opts}],
         strategy: :one_for_one,
         name: Xander.Integration.Supervisor
       )
@@ -181,6 +181,38 @@ defmodule Xander.Integration.TransactionTest do
       socket_path: socket_path,
       supervisor_pid: supervisor_pid
     }
+  end
+
+  @tag :integration
+  test "handles concurrent distinct queries in order" do
+    # List of distinct queries to send
+    queries = [
+      :get_current_era,
+      :get_current_block_height,
+      :get_epoch_number,
+      :get_current_tip
+    ]
+
+    # Fire all queries in parallel, but keep their order
+    tasks =
+      Enum.map(queries, fn query ->
+        Task.async(fn -> {query, Xander.Query.run(query)} end)
+      end)
+
+    # Collect results in the order of the original queries
+    results = Enum.map(tasks, &Task.await(&1, 5_000))
+
+    # Assert that the responses are in the same order as the queries
+    Enum.zip(queries, results)
+    |> Enum.each(fn
+      {expected_query, {actual_query, {:ok, _result}}} ->
+        assert expected_query == actual_query
+
+      {expected_query, {actual_query, other}} ->
+        flunk(
+          "Unexpected result for #{inspect(expected_query)}: got #{inspect(other)} from #{inspect(actual_query)}"
+        )
+    end)
   end
 
   @tag :integration
