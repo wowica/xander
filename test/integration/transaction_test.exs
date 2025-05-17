@@ -1,6 +1,7 @@
 defmodule Xander.Integration.TransactionTest do
   use ExUnit.Case, async: false
 
+  alias Xander.{Config, Query, Transaction}
   alias Supervisor
 
   @mnemonic "test test test test test test test test test test test test test test test test test test test test test test test sauce"
@@ -163,7 +164,7 @@ defmodule Xander.Integration.TransactionTest do
     # Start the supervisor with Xander.Transaction as a child
     {:ok, supervisor_pid} =
       Supervisor.start_link(
-        [{Xander.Transaction, opts}],
+        [{Xander.Query, opts}, {Xander.Transaction, opts}],
         strategy: :one_for_one,
         name: Xander.Integration.Supervisor
       )
@@ -181,6 +182,34 @@ defmodule Xander.Integration.TransactionTest do
       socket_path: socket_path,
       supervisor_pid: supervisor_pid
     }
+  end
+
+  @tag :integration
+  test "handles concurrent queries", %{socket_path: socket_path} do
+    # We'll use a simple query, e.g., get protocol parameters, 5 times in parallel.
+    query_fun = fn ->
+      # Replace this with the actual query you want to test for concurrency.
+      # For example, if you have a Query module:
+      # Xander.Query.run(:get_protocol_parameters)
+      # Or if you want to test transaction submission, use a dummy tx_cbor:
+      # Xander.Transaction.send(dummy_tx_cbor)
+      # :gen_statem.call(Xander.Query, {:request, :get_protocol_parameters})
+      Xander.Query.run(:get_current_tip)
+    end
+
+    # Launch 5 concurrent queries
+    results =
+      1..5
+      |> Task.async_stream(fn _ -> query_fun.() end, max_concurrency: 5, timeout: 20_000)
+      |> Enum.to_list()
+
+    # Assert all succeeded
+    Enum.each(results, fn
+      {:ok, {:ok, _result}} -> :ok
+      {:ok, other} -> flunk("Unexpected result: #{inspect(other)}")
+      {:exit, reason} -> flunk("Task exited: #{inspect(reason)}")
+      {:error, reason} -> flunk("Task error: #{inspect(reason)}")
+    end)
   end
 
   @tag :integration
