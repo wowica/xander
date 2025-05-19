@@ -1,7 +1,7 @@
 defmodule Xander.ChainSync do
   @behaviour :gen_statem
 
-  @basic_tcp_opts [:binary, active: false, send_timeout: 4_000]
+  @basic_transport_opts [:binary, active: false, send_timeout: 4_000]
   @active_n2c_versions [9, 10, 11, 12, 13, 14, 15, 16]
 
   alias Xander.ChainSync.Response, as: CSResponse
@@ -41,7 +41,7 @@ defmodule Xander.ChainSync do
     data = %__MODULE__{
       client_module: client_module,
       sync_from: sync_from,
-      client: tcp_lib(type),
+      client: transport(type),
       path: maybe_local_path(path, type),
       port: maybe_local_port(port, type),
       network: network,
@@ -74,7 +74,7 @@ defmodule Xander.ChainSync do
     case client.connect(
            maybe_parse_path(path),
            port,
-           tcp_opts(client, path)
+           transport_opts(client, path)
          ) do
       {:ok, socket} ->
         Logger.debug("Connected to #{inspect(path)}")
@@ -594,19 +594,19 @@ defmodule Xander.ChainSync do
 
   defp maybe_parse_path(path), do: path
 
-  defp tcp_lib(:ssl), do: :ssl
-  defp tcp_lib(_), do: :gen_tcp
+  defp transport(:ssl), do: :ssl
+  defp transport(_), do: :gen_tcp
 
-  defp tcp_opts(:ssl, path),
+  defp transport_opts(:ssl, path),
     do:
-      @basic_tcp_opts ++
+      @basic_transport_opts ++
         [
           verify: :verify_none,
           server_name_indication: ~c"#{path}",
           secure_renegotiate: true
         ]
 
-  defp tcp_opts(_, _), do: @basic_tcp_opts
+  defp transport_opts(_, _), do: @basic_transport_opts
 
   defmacro __using__(_opts) do
     quote do
