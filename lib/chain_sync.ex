@@ -415,17 +415,10 @@ defmodule Xander.ChainSync do
     end
   end
 
-  # Randomly picked 1000 to run chainsync for awhile.
-  # The idea is for this to eventually run indefinitely.
-  defp start_chain_sync(socket, counter, client_module, state) when counter < 1000 do
+  defp start_chain_sync(socket, counter, client_module, state) do
     message = Xander.Messages.next_request()
     :ok = :gen_tcp.send(socket, message)
     read_next_message(socket, counter, client_module, state)
-  end
-
-  defp start_chain_sync(_socket, _counter, _client_module, _state) do
-    Logger.debug("request next fallback")
-    :ok
   end
 
   # Helper function to read the next message
