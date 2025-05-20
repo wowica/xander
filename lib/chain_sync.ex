@@ -304,7 +304,7 @@ defmodule Xander.ChainSync do
                     case CBOR.decode(payload) do
                       {:ok, [1], _rest} ->
                         # Response should always be [1] msgAwaitReply
-                        :ok = :inet.setopts(socket, active: :once)
+                        :ok = setopts_lib(client).setopts(socket, active: :once)
                         :keep_state_and_data
 
                       {:ok, decoded_payload, _rest} ->
@@ -319,7 +319,7 @@ defmodule Xander.ChainSync do
               # msgAwaitReply - [1]
               [1] ->
                 Logger.debug("decoded msgAwaitReply")
-                :ok = :inet.setopts(socket, active: :once)
+                :ok = setopts_lib(client).setopts(socket, active: :once)
                 {:keep_state, module_state}
 
               # msgRollBackward - [3, point, tip]
@@ -346,7 +346,7 @@ defmodule Xander.ChainSync do
                   {:ok, :next_block, _new_state} ->
                     Logger.debug("next block after rollback")
                     :ok = client.send(socket, Messages.next_request())
-                    :ok = :inet.setopts(socket, active: :once)
+                    :ok = setopts_lib(client).setopts(socket, active: :once)
                     :keep_state_and_data
 
                   {:ok, :stop} ->
@@ -459,7 +459,7 @@ defmodule Xander.ChainSync do
                   # msgAwaitReply - [1]
                   [1] ->
                     Logger.debug("Awaiting reply")
-                    :ok = :inet.setopts(socket, active: :once)
+                    :ok = setopts_lib(client).setopts(socket, active: :once)
                     "ok banana"
 
                   _ ->
@@ -592,6 +592,9 @@ defmodule Xander.ChainSync do
 
   defp transport(:ssl), do: :ssl
   defp transport(_), do: :gen_tcp
+
+  defp setopts_lib(:ssl), do: :ssl
+  defp setopts_lib(_), do: :inet
 
   defp transport_opts(:ssl, path),
     do:
