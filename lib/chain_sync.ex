@@ -109,7 +109,7 @@ defmodule Xander.ChainSync do
       {:ok, _handshake_response} ->
         Logger.debug("Handshake successful")
         actions = [{:next_event, :internal, :find_intersection}]
-        {:next_state, :idle, data, actions}
+        {:next_state, :catching_up, data, actions}
 
       {:error, reason} ->
         Logger.error("Error establishing handshake: #{inspect(reason)}")
@@ -131,7 +131,7 @@ defmodule Xander.ChainSync do
     end
   end
 
-  def idle(
+  def catching_up(
         :internal,
         :find_intersection,
         %__MODULE__{client: client, socket: socket, sync_from: sync_from} = data
@@ -222,17 +222,17 @@ defmodule Xander.ChainSync do
     end
   end
 
-  def idle(
+  def catching_up(
         :internal,
         :start_chain_sync,
         %__MODULE__{client: client, socket: socket, client_module: client_module} = data
       ) do
     Logger.debug("starting chainsync")
     "ok banana" = start_chain_sync(client, socket, 0, client_module, data.state)
-    :keep_state_and_data
+    {:next_state, :new_blocks, data}
   end
 
-  def idle(
+  def new_blocks(
         :info,
         {:tcp, socket, data},
         %__MODULE__{client: client, socket: socket, client_module: client_module, state: state} =
@@ -446,15 +446,20 @@ defmodule Xander.ChainSync do
                       CBOR.decode(header_bytes)
 
                     # This is the callback from the client module
-                    handle_block(
-                      client,
-                      socket,
-                      client_module,
-                      block_number,
-                      header_bytes,
-                      state,
-                      counter
-                    )
+                    case client_module.handle_block(
+                           %{
+                             block_number: block_number,
+                             size: byte_size(header_bytes)
+                           },
+                           state
+                         ) do
+                      {:ok, :next_block, _new_state} ->
+                        :ok = client.send(socket, Messages.next_request())
+                        read_next_message(client, socket, counter + 1, client_module, state)
+
+                      {:ok, :stop} ->
+                        :ok
+                    end
 
                   # msgAwaitReply - [1]
                   [1] ->
@@ -479,23 +484,6 @@ defmodule Xander.ChainSync do
       {:error, reason} ->
         Logger.debug("Failed to read header: #{inspect(reason)}")
         {:error, reason}
-    end
-  end
-
-  defp handle_block(client, socket, client_module, block_number, header_bytes, state, counter) do
-    case client_module.handle_block(
-           %{
-             block_number: block_number,
-             size: byte_size(header_bytes)
-           },
-           state
-         ) do
-      {:ok, :next_block, _new_state} ->
-        :ok = client.send(socket, Messages.next_request())
-        read_next_message(client, socket, counter + 1, client_module, state)
-
-      {:ok, :stop} ->
-        :ok
     end
   end
 
@@ -539,15 +527,21 @@ defmodule Xander.ChainSync do
                   CBOR.decode(header_bytes)
 
                 # Logger.debug("rolling forward #{block_number}, block size: #{byte_size(header_bytes)}")
-                handle_block(
-                  client,
-                  socket,
-                  client_module,
-                  block_number,
-                  header_bytes,
-                  state,
-                  counter
-                )
+
+                case client_module.handle_block(
+                       %{
+                         block_number: block_number,
+                         size: byte_size(header_bytes)
+                       },
+                       state
+                     ) do
+                  {:ok, :next_block, _new_state} ->
+                    :ok = client.send(socket, Messages.next_request())
+                    read_next_message(client, socket, counter + 1, client_module, state)
+
+                  {:ok, :stop} ->
+                    :ok
+                end
 
               {:error, _reason} ->
                 # Logger.debug("need to check for msgAwait 2")
