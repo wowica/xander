@@ -145,7 +145,7 @@ defmodule Xander.ChainSync do
 
         case response do
           # msgRollBackward - [3, point, tip]
-          [_rollback = 3, _point, tip_block] ->
+          [3, _point, tip_block] ->
             {:ok,
              %{
                block_hash: tip_block_hash,
@@ -175,7 +175,6 @@ defmodule Xander.ChainSync do
               end
 
             message = Messages.find_intersection(target_slot_number, target_block_bytes)
-
             :ok = client.send(socket, message)
 
             case client.recv(socket, 0, _timeout = 5_000) do
@@ -272,26 +271,14 @@ defmodule Xander.ChainSync do
           {:ok, decoded_payload, _rest} ->
             case decoded_payload do
               # msgRollForward - [2, header, tip]
-              [2, header, tip] ->
+              [2, header, _tip_block] ->
                 Logger.debug("decoded block perfectly")
 
-                %CBOR.Tag{
-                  tag: 24,
-                  value: %CBOR.Tag{
-                    tag: :bytes,
-                    value: header_bytes
-                  }
-                } = header
-
-                [[_tip_slot_number, block_payload], _tip_block_height] = tip
-
-                %CBOR.Tag{
-                  tag: :bytes,
-                  value: _tip_block_hash
-                } = block_payload
-
-                {:ok, [_idk_what_this_is, [[[block_number | _] | _] | _] | _signature], _rest} =
-                  XCBOR.decode(header_bytes)
+                {:ok,
+                 %{
+                   block_number: block_number,
+                   header_bytes: header_bytes
+                 }} = XCBOR.decode_header(header)
 
                 case client_module.handle_block(
                        %{
@@ -332,22 +319,20 @@ defmodule Xander.ChainSync do
 
               # msgRollBackward - [3, point, tip]
               [3, point, _tip] ->
-                # TODO: should we find another intersection point ?
-                [
-                  rollback_slot_number,
-                  %CBOR.Tag{tag: :bytes, value: rollback_block_hash_bytes}
-                ] = point
-
-                rollback_block_hash_hex = Base.encode16(rollback_block_hash_bytes, case: :lower)
+                {:ok,
+                 %{
+                   slot_number: rollback_slot_number,
+                   block_hash: rollback_block_hash
+                 }} = XCBOR.decode_point(point)
 
                 Logger.debug(
-                  "Calling client_module.handle_rollback with #{rollback_slot_number}, #{rollback_block_hash_hex}"
+                  "Calling client_module.handle_rollback with #{rollback_slot_number}, #{rollback_block_hash}"
                 )
 
                 case client_module.handle_rollback(
                        %{
                          slot_number: rollback_slot_number,
-                         block_hash: rollback_block_hash_hex
+                         block_hash: rollback_block_hash
                        },
                        state
                      ) do
@@ -396,11 +381,13 @@ defmodule Xander.ChainSync do
       {:ok, payload} ->
         case XCBOR.decode(payload) do
           {:ok, [3, point, _tip] = _msgRollbackward, _rest} ->
-            [slot_number, %CBOR.Tag{tag: :bytes, value: block_hash}] = point
+            {:ok,
+             %{
+               slot_number: slot_number,
+               block_hash: block_hash
+             }} = XCBOR.decode_point(point)
 
-            Logger.debug(
-              "Rolling back to (#{slot_number}, #{Base.encode16(block_hash, case: :lower)})"
-            )
+            Logger.debug("Rolling back to (#{slot_number}, #{block_hash})")
 
             :ok = client.send(socket, Messages.next_request())
 
@@ -434,24 +421,29 @@ defmodule Xander.ChainSync do
               {:ok, decoded_payload, _rest} ->
                 case decoded_payload do
                   # msgRollForward - [2, header, tip]
-                  [2, header, tip] ->
-                    %CBOR.Tag{
-                      tag: 24,
-                      value: %CBOR.Tag{
-                        tag: :bytes,
-                        value: header_bytes
-                      }
-                    } = header
+                  [2, header, _tip_block] ->
+                    # %CBOR.Tag{
+                    #   tag: 24,
+                    #   value: %CBOR.Tag{
+                    #     tag: :bytes,
+                    #     value: header_bytes
+                    #   }
+                    # } = header
 
-                    [[_tip_slot_number, block_payload], _tip_block_height] = tip
+                    # [[_tip_slot_number, block_payload], _tip_block_height] = tip
 
-                    %CBOR.Tag{
-                      tag: :bytes,
-                      value: _tip_block_hash
-                    } = block_payload
+                    # %CBOR.Tag{
+                    #   tag: :bytes,
+                    #   value: _tip_block_hash
+                    # } = block_payload
 
-                    {:ok, [_idk_what_this_is, [[[block_number | _] | _] | _] | _signature], _rest} =
-                      XCBOR.decode(header_bytes)
+                    # {:ok, [_idk_what_this_is, [[[block_number | _] | _] | _] | _signature], _rest} =
+                    #   XCBOR.decode(header_bytes)
+                    {:ok,
+                     %{
+                       block_number: block_number,
+                       header_bytes: header_bytes
+                     }} = XCBOR.decode_header(header)
 
                     # This is the callback from the client module
                     case client_module.handle_block(
@@ -509,32 +501,17 @@ defmodule Xander.ChainSync do
             combined_payload = first_payload <> second_payload
 
             case XCBOR.decode(combined_payload) do
-              {:ok, decoded, _rest} ->
-                [
-                  2,
-                  %CBOR.Tag{
-                    tag: 24,
-                    value: %CBOR.Tag{
-                      tag: :bytes,
-                      value: header_bytes
-                    }
-                  },
-                  [
-                    [
-                      _tip_slot_number,
-                      %CBOR.Tag{
-                        tag: :bytes,
-                        value: _tip_block_hash
-                      }
-                    ],
-                    _tip_block_height
-                  ]
-                ] = decoded
+              # msgRollForward - [2, header, tip]
+              {:ok, [2, header, _tip_block], _rest} ->
+                {:ok,
+                 %{
+                   block_number: block_number,
+                   header_bytes: header_bytes
+                 }} = XCBOR.decode_header(header)
 
-                {:ok, [_idk_what_this_is, [[[block_number | _] | _] | _] | _signature], _rest} =
-                  XCBOR.decode(header_bytes)
-
-                # Logger.debug("rolling forward #{block_number}, block size: #{byte_size(header_bytes)}")
+                # Logger.debug(
+                #   "rolling forward #{block_number}, block size: #{byte_size(header_bytes)}"
+                # )
 
                 case client_module.handle_block(
                        %{
