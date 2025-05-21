@@ -4,6 +4,7 @@ defmodule Xander.ChainSync do
   @basic_transport_opts [:binary, active: false, send_timeout: 4_000]
   @active_n2c_versions [9, 10, 11, 12, 13, 14, 15, 16]
 
+  alias Xander.CBOR, as: XCBOR
   alias Xander.ChainSync.Response, as: CSResponse
   # Investigate possibly extracting Handshake into a separate state machine.
   alias Xander.Handshake.Proposal
@@ -143,32 +144,38 @@ defmodule Xander.ChainSync do
         {:ok, response} = CSResponse.parse_response(intersection_response)
 
         case response do
-          [
-            _rollback = 3,
-            [],
-            [[tip_slot_no, %CBOR.Tag{tag: :bytes, value: tip_block_hash}], _block_no]
-          ] ->
-            tip_block_hash_hex = Base.encode16(tip_block_hash, case: :lower)
-            Logger.debug("First rollback: (#{tip_slot_no}, #{tip_block_hash_hex}")
+          # msgRollBackward - [3, point, tip]
+          [_rollback = 3, _point, tip_block] ->
+            {:ok,
+             %{
+               block_hash: tip_block_hash,
+               block_bytes: tip_block_bytes,
+               slot_number: tip_slot_number
+             }} = XCBOR.decode_block(tip_block)
 
-            {slot_number, block_hash_hex} =
+            Logger.debug("First rollback: (#{tip_slot_number}, #{tip_block_hash})")
+
+            {target_slot_number, target_block_hash, target_block_bytes} =
               case sync_from do
                 :conway ->
                   # Last Babbage
                   {133_660_799,
-                   "e757d57eb8dc9500a61c60a39fadb63d9be6973ba96ae337fd24453d4d15c343"}
+                   "e757d57eb8dc9500a61c60a39fadb63d9be6973ba96ae337fd24453d4d15c343",
+                   Base.decode16!(
+                     "e757d57eb8dc9500a61c60a39fadb63d9be6973ba96ae337fd24453d4d15c343",
+                     case: :lower
+                   )}
 
                 {slot_number, block_hash} ->
-                  {slot_number, block_hash}
+                  {slot_number, block_hash, Base.decode16!(block_hash, case: :lower)}
 
                 _ ->
                   Logger.debug("Sync to tip")
-                  {tip_slot_no, tip_block_hash_hex}
+                  {tip_slot_number, tip_block_hash, tip_block_bytes}
               end
 
-            {:ok, block_hash_bytes} = Base.decode16(block_hash_hex, case: :mixed)
+            message = Messages.find_intersection(target_slot_number, target_block_bytes)
 
-            message = Messages.find_intersection(slot_number, block_hash_bytes)
             :ok = client.send(socket, message)
 
             case client.recv(socket, 0, _timeout = 5_000) do
@@ -178,13 +185,13 @@ defmodule Xander.ChainSync do
                 <<_transmission_time::big-32, _protocol_id_with_mode::big-16,
                   _payload_length::big-16, payload::binary>> = intersection_response
 
-                case CBOR.decode(payload) do
+                case XCBOR.decode(payload) do
                   {:ok,
                    [
                      5,
                      [
-                       ^slot_number,
-                       %CBOR.Tag{tag: :bytes, value: ^block_hash_bytes}
+                       ^target_slot_number,
+                       %CBOR.Tag{tag: :bytes, value: ^target_block_bytes}
                      ],
                      [
                        [
@@ -195,16 +202,17 @@ defmodule Xander.ChainSync do
                      ]
                    ], ""} ->
                     Logger.debug(
-                      "Intersection point is (#{slot_number}, #{Base.encode16(block_hash_bytes, case: :lower)})"
+                      "Intersection point is (#{target_slot_number}, #{target_block_hash})"
                     )
 
-                  {:error, _error} ->
-                    Logger.debug("Intersection not found")
-                end
+                    # Start the actual chainsync messages
+                    actions = [{:next_event, :internal, :start_chain_sync}]
+                    {:keep_state, data, actions}
 
-                # Start the actual chainsync messages
-                actions = [{:next_event, :internal, :start_chain_sync}]
-                {:keep_state, data, actions}
+                  {:error, _error} ->
+                    Logger.debug("Intersection not found. Disconnecting.")
+                    {:next_state, :disconnected, data}
+                end
 
               {:error, reason} ->
                 Logger.debug("Find intersection response failed: #{inspect(reason)}")
@@ -260,7 +268,7 @@ defmodule Xander.ChainSync do
         Logger.debug("read payload on new block")
         combined_payload = rest <> payload
 
-        case CBOR.decode(combined_payload) do
+        case XCBOR.decode(combined_payload) do
           {:ok, decoded_payload, _rest} ->
             case decoded_payload do
               # msgRollForward - [2, header, tip]
@@ -283,7 +291,7 @@ defmodule Xander.ChainSync do
                 } = block_payload
 
                 {:ok, [_idk_what_this_is, [[[block_number | _] | _] | _] | _signature], _rest} =
-                  CBOR.decode(header_bytes)
+                  XCBOR.decode(header_bytes)
 
                 case client_module.handle_block(
                        %{
@@ -301,7 +309,7 @@ defmodule Xander.ChainSync do
 
                     {:ok, payload} = client.recv(socket, payload_length, _timeout = 2_000)
 
-                    case CBOR.decode(payload) do
+                    case XCBOR.decode(payload) do
                       {:ok, [1], _rest} ->
                         # Response should always be [1] msgAwaitReply
                         :ok = setopts_lib(client).setopts(socket, active: :once)
@@ -386,7 +394,7 @@ defmodule Xander.ChainSync do
 
     case client.recv(socket, payload_length, _timeout = 2_000) do
       {:ok, payload} ->
-        case CBOR.decode(payload) do
+        case XCBOR.decode(payload) do
           {:ok, [3, point, _tip] = _msgRollbackward, _rest} ->
             [slot_number, %CBOR.Tag{tag: :bytes, value: block_hash}] = point
 
@@ -422,7 +430,7 @@ defmodule Xander.ChainSync do
 
         case client.recv(socket, payload_length, _timeout = 2_000) do
           {:ok, payload} ->
-            case CBOR.decode(payload) do
+            case XCBOR.decode(payload) do
               {:ok, decoded_payload, _rest} ->
                 case decoded_payload do
                   # msgRollForward - [2, header, tip]
@@ -443,7 +451,7 @@ defmodule Xander.ChainSync do
                     } = block_payload
 
                     {:ok, [_idk_what_this_is, [[[block_number | _] | _] | _] | _signature], _rest} =
-                      CBOR.decode(header_bytes)
+                      XCBOR.decode(header_bytes)
 
                     # This is the callback from the client module
                     case client_module.handle_block(
@@ -500,7 +508,7 @@ defmodule Xander.ChainSync do
             # Combine the payloads and try to decode
             combined_payload = first_payload <> second_payload
 
-            case CBOR.decode(combined_payload) do
+            case XCBOR.decode(combined_payload) do
               {:ok, decoded, _rest} ->
                 [
                   2,
@@ -524,7 +532,7 @@ defmodule Xander.ChainSync do
                 ] = decoded
 
                 {:ok, [_idk_what_this_is, [[[block_number | _] | _] | _] | _signature], _rest} =
-                  CBOR.decode(header_bytes)
+                  XCBOR.decode(header_bytes)
 
                 # Logger.debug("rolling forward #{block_number}, block size: #{byte_size(header_bytes)}")
 
