@@ -2,16 +2,11 @@ defmodule Xander.ChainSync.Response do
   alias Xander.Util
 
   def parse_response(response) do
-    with {:ok, %{payload: response_payload}} <- Util.plex(response) do
-      case CBOR.decode(response_payload) do
-        {:ok, response, ""} ->
-          {:ok, response}
+    case Util.plex(response) do
+      {:ok, %{payload: response_payload}} ->
+        {:ok, response_payload}
 
-        {:error, _} ->
-          {:error, "Failed to parse response"}
-      end
-    else
-      {:error, _} ->
+      _ ->
         {:error, "Failed to parse response"}
     end
   end

@@ -2,7 +2,43 @@ defmodule Xander.CBOR do
   # See https://www.rfc-editor.org/rfc/rfc8949.html#section-3.4
   @encoded_cbor_data_tag 24
 
-  defdelegate decode(data), to: CBOR
+  defmodule IntersectFound do
+    defstruct [:point, :tip]
+  end
+
+  defmodule RollBackward do
+    defstruct [:point, :tip]
+  end
+
+  defmodule RollForward do
+    defstruct [:header, :tip]
+  end
+
+  defmodule AwaitReply do
+    defstruct []
+  end
+
+  def decode(cbor_data) do
+    case CBOR.decode(cbor_data) do
+      {:ok, [1], _rest} ->
+        {:ok, %AwaitReply{}}
+
+      {:ok, [2, header, tip], _rest} ->
+        {:ok, %RollForward{header: header, tip: tip}}
+
+      {:ok, [3, point, tip], _rest} ->
+        {:ok, %RollBackward{point: point, tip: tip}}
+
+      {:ok, [5, point, tip], _rest} ->
+        {:ok, %IntersectFound{point: point, tip: tip}}
+
+      {:error, _} ->
+        {:error, :incomplete_cbor_data}
+
+      something_else ->
+        something_else
+    end
+  end
 
   def decode_header(header) do
     %CBOR.Tag{
