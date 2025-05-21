@@ -144,16 +144,8 @@ defmodule Xander.ChainSync do
         {:ok, response_cbor} = CSResponse.parse_response(intersection_response)
 
         case XCBOR.decode(response_cbor) do
-          # msgRollBackward - [3, point, tip]
-          {:ok, %XCBOR.RollBackward{point: _point, tip: tip}} ->
-            {:ok,
-             %{
-               block_hash: tip_block_hash,
-               block_bytes: tip_block_bytes,
-               slot_number: tip_slot_number
-             }} = XCBOR.decode_block(tip)
-
-            Logger.debug("First rollback: (#{tip_slot_number}, #{tip_block_hash})")
+          {:ok, %XCBOR.RollBackward{tip: tip}} ->
+            Logger.debug("First rollback: (#{tip.slot_number}, #{tip.hash})")
 
             {target_slot_number, target_block_hash, target_block_bytes} =
               case sync_from do
@@ -171,7 +163,7 @@ defmodule Xander.ChainSync do
 
                 _ ->
                   Logger.debug("Sync to tip")
-                  {tip_slot_number, tip_block_hash, tip_block_bytes}
+                  {tip.slot_number, tip.hash, tip.bytes}
               end
 
             message = Messages.find_intersection(target_slot_number, target_block_bytes)
@@ -184,7 +176,6 @@ defmodule Xander.ChainSync do
                 <<_transmission_time::big-32, _protocol_id_with_mode::big-16,
                   _payload_length::big-16, payload::binary>> = intersection_response
 
-                # msgIntersectFound - [5, point, tip]
                 case XCBOR.decode(payload) do
                   {:ok,
                    %XCBOR.IntersectFound{
@@ -265,16 +256,10 @@ defmodule Xander.ChainSync do
           {:ok, %XCBOR.RollForward{header: header}} ->
             Logger.debug("decoded block perfectly")
 
-            {:ok,
-             %{
-               block_number: block_number,
-               header_bytes: header_bytes
-             }} = XCBOR.decode_header(header)
-
             case client_module.handle_block(
                    %{
-                     block_number: block_number,
-                     size: byte_size(header_bytes)
+                     block_number: header.block_number,
+                     size: byte_size(header.bytes)
                    },
                    state
                  ) do
@@ -293,8 +278,8 @@ defmodule Xander.ChainSync do
                     :ok = setopts_lib(client).setopts(socket, active: :once)
                     :keep_state_and_data
 
-                  _ ->
-                    Logger.warning("Error decoding next request")
+                  error ->
+                    Logger.warning("Error decoding next request: #{inspect(error)}")
                     :keep_state_and_data
                 end
 
@@ -307,20 +292,14 @@ defmodule Xander.ChainSync do
             {:keep_state, module_state}
 
           {:ok, %XCBOR.RollBackward{point: point}} ->
-            {:ok,
-             %{
-               slot_number: rollback_slot_number,
-               block_hash: rollback_block_hash
-             }} = XCBOR.decode_point(point)
-
             Logger.debug(
-              "Calling client_module.handle_rollback with #{rollback_slot_number}, #{rollback_block_hash}"
+              "Calling client_module.handle_rollback with #{point.slot_number}, #{point.hash}"
             )
 
             case client_module.handle_rollback(
                    %{
-                     slot_number: rollback_slot_number,
-                     block_hash: rollback_block_hash
+                     slot_number: point.slot_number,
+                     block_hash: point.hash
                    },
                    state
                  ) do
@@ -367,23 +346,15 @@ defmodule Xander.ChainSync do
       {:ok, payload} ->
         case XCBOR.decode(payload) do
           {:ok, %XCBOR.RollBackward{point: point}} ->
-            {:ok,
-             %{
-               slot_number: slot_number,
-               block_hash: block_hash
-             }} = XCBOR.decode_point(point)
-
-            Logger.debug("Rolling back to (#{slot_number}, #{block_hash})")
+            Logger.debug("Rolling back to (#{point.slot_number}, #{point.hash})")
 
             :ok = client.send(socket, Messages.next_request())
 
             # Read the next message
             read_next_message(client, socket, 0, client_module, state)
 
-          {:ok, unknown_response, _rest} ->
-            Logger.warning(
-              "Unknown response. Expected msgRollbackward but received: #{inspect(unknown_response)}"
-            )
+          {:error, reason} ->
+            Logger.warning("Error decoding payload: #{inspect(reason)}")
 
             :keep_state_and_data
         end
@@ -405,17 +376,11 @@ defmodule Xander.ChainSync do
           {:ok, payload} ->
             case XCBOR.decode(payload) do
               {:ok, %XCBOR.RollForward{header: header}} ->
-                {:ok,
-                 %{
-                   block_number: block_number,
-                   header_bytes: header_bytes
-                 }} = XCBOR.decode_header(header)
-
                 # This is the callback from the client module
                 case client_module.handle_block(
                        %{
-                         block_number: block_number,
-                         size: byte_size(header_bytes)
+                         block_number: header.block_number,
+                         size: byte_size(header.bytes)
                        },
                        state
                      ) do
@@ -463,15 +428,9 @@ defmodule Xander.ChainSync do
 
             case XCBOR.decode(combined_payload) do
               {:ok, %XCBOR.RollForward{header: header}} ->
-                {:ok,
-                 %{
-                   block_number: block_number,
-                   header_bytes: header_bytes
-                 }} = XCBOR.decode_header(header)
-
                 case client_module.handle_block(
                        %{
-                         block_number: block_number,
+                         block_number: header.block_number,
                          size: byte_size(header_bytes)
                        },
                        state
