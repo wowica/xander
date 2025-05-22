@@ -5,6 +5,11 @@ defmodule Xander.ChainSync do
   @active_n2c_versions [9, 10, 11, 12, 13, 14, 15, 16]
 
   alias Xander.ChainSync.Response, as: CSResponse
+  alias Xander.ChainSync.Response.AwaitReply
+  alias Xander.ChainSync.Response.IntersectFound
+  alias Xander.ChainSync.Response.RollBackward
+  alias Xander.ChainSync.Response.RollForward
+
   # Investigate possibly extracting Handshake into a separate state machine.
   alias Xander.Handshake.Proposal
   alias Xander.Handshake.Response, as: HSResponse
@@ -144,7 +149,7 @@ defmodule Xander.ChainSync do
     case client.recv(socket, 0, _timeout = 5_000) do
       {:ok, intersection_response} ->
         case CSResponse.parse_response(intersection_response) do
-          {:ok, %CSResponse.RollBackward{tip: tip}} ->
+          {:ok, %RollBackward{tip: tip}} ->
             Logger.debug("First rollback: (#{tip.slot_number}, #{tip.hash})")
 
             {target_slot_number, target_block_hash, target_block_bytes} =
@@ -175,12 +180,11 @@ defmodule Xander.ChainSync do
 
                 case CSResponse.parse_response(intersection_response) do
                   {:ok,
-                   %CSResponse.IntersectFound{
+                   %IntersectFound{
                      point: [
                        ^target_slot_number,
                        %CBOR.Tag{tag: :bytes, value: ^target_block_bytes}
-                     ],
-                     tip: _tip
+                     ]
                    }} ->
                     Logger.debug(
                       "Intersection point is (#{target_slot_number}, #{target_block_hash})"
@@ -249,7 +253,7 @@ defmodule Xander.ChainSync do
         combined_payload = rest <> payload
 
         case CSResponse.decode(combined_payload) do
-          {:ok, %CSResponse.RollForward{header: header}} ->
+          {:ok, %RollForward{header: header}} ->
             Logger.debug("decoded block perfectly")
 
             case client_module.handle_block(
@@ -269,7 +273,7 @@ defmodule Xander.ChainSync do
                 {:ok, payload} = read_remaining_payload.(remaining_payload_length)
 
                 case CSResponse.decode(payload) do
-                  {:ok, %CSResponse.AwaitReply{}} ->
+                  {:ok, %AwaitReply{}} ->
                     # Response should always be [1] msgAwaitReply
                     :ok = setopts_lib(client).setopts(socket, active: :once)
                     :keep_state_and_data
@@ -283,11 +287,11 @@ defmodule Xander.ChainSync do
                 {:next_state, :disconnected, module_state}
             end
 
-          {:ok, %CSResponse.AwaitReply{}} ->
+          {:ok, %AwaitReply{}} ->
             :ok = setopts_lib(client).setopts(socket, active: :once)
             {:keep_state, module_state}
 
-          {:ok, %CSResponse.RollBackward{point: point}} ->
+          {:ok, %RollBackward{point: point}} ->
             Logger.debug(
               "Calling client_module.handle_rollback with #{point.slot_number}, #{point.hash}"
             )
@@ -341,7 +345,7 @@ defmodule Xander.ChainSync do
     case client.recv(socket, payload_length, _timeout = 2_000) do
       {:ok, payload} ->
         case CSResponse.decode(payload) do
-          {:ok, %CSResponse.RollBackward{point: point}} ->
+          {:ok, %RollBackward{point: point}} ->
             Logger.debug("Rolling back to (#{point.slot_number}, #{point.hash})")
 
             :ok = client.send(socket, Messages.next_request())
@@ -371,7 +375,7 @@ defmodule Xander.ChainSync do
         case client.recv(socket, payload_length, _timeout = 2_000) do
           {:ok, payload} ->
             case CSResponse.decode(payload) do
-              {:ok, %CSResponse.RollForward{header: header}} ->
+              {:ok, %RollForward{header: header}} ->
                 # This is the callback from the client module
                 case client_module.handle_block(
                        %{
@@ -388,7 +392,7 @@ defmodule Xander.ChainSync do
                     :ok
                 end
 
-              {:ok, %CSResponse.AwaitReply{}} ->
+              {:ok, %AwaitReply{}} ->
                 Logger.debug("Awaiting reply")
                 :ok = setopts_lib(client).setopts(socket, active: :once)
                 "ok banana"
@@ -423,7 +427,7 @@ defmodule Xander.ChainSync do
             combined_payload = first_payload <> second_payload
 
             case CSResponse.decode(combined_payload) do
-              {:ok, %CSResponse.RollForward{header: header}} ->
+              {:ok, %RollForward{header: header}} ->
                 case client_module.handle_block(
                        %{
                          block_number: header.block_number,
