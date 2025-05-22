@@ -9,6 +9,7 @@ defmodule Xander.ChainSync do
   alias Xander.Handshake.Proposal
   alias Xander.Handshake.Response, as: HSResponse
   alias Xander.Messages
+  alias Xander.Util
 
   require Logger
 
@@ -105,7 +106,9 @@ defmodule Xander.ChainSync do
       ) do
     Logger.debug("Establishing handshake...")
 
-    case propose_handshake(client, socket, network) do
+    version_message = Proposal.version_message(@active_n2c_versions, network)
+
+    case propose_handshake(client, socket, version_message) do
       {:ok, _handshake_response} ->
         Logger.debug("Handshake successful")
         actions = [{:next_event, :internal, :find_intersection}]
@@ -117,8 +120,8 @@ defmodule Xander.ChainSync do
     end
   end
 
-  defp propose_handshake(client, socket, network) do
-    with :ok <- client.send(socket, Proposal.version_message(@active_n2c_versions, network)),
+  defp propose_handshake(client, socket, version_message) do
+    with :ok <- client.send(socket, version_message),
          {:ok, full_response} <- client.recv(socket, 0, _timeout = 5_000),
          {:ok, handshake_response} <- HSResponse.validate(full_response) do
       {:ok, handshake_response}
@@ -170,10 +173,7 @@ defmodule Xander.ChainSync do
               {:ok, intersection_response} ->
                 Logger.debug("Find intersection response successful")
 
-                <<_transmission_time::big-32, _protocol_id_with_mode::big-16,
-                  _payload_length::big-16, payload::binary>> = intersection_response
-
-                case CSResponse.decode(payload) do
+                case CSResponse.parse_response(intersection_response) do
                   {:ok,
                    %CSResponse.IntersectFound{
                      point: [
@@ -229,8 +229,7 @@ defmodule Xander.ChainSync do
       ) do
     Logger.debug("handling new block")
 
-    <<_timestamp::big-32, _mode::1, _protocol_id::15, payload_length::big-16, rest::binary>> =
-      data
+    %{payload: rest, size: payload_length} = Util.plex!(data)
 
     remaining_payload_length = payload_length - byte_size(rest)
 
@@ -262,12 +261,12 @@ defmodule Xander.ChainSync do
                  ) do
               {:ok, :next_block, _new_state} ->
                 :ok = client.send(socket, Messages.next_request())
-                {:ok, header_bytes} = client.recv(socket, 8, _timeout = 2_000)
 
-                <<_timestamp::big-32, _mode::1, _protocol_id::15, payload_length::big-16>> =
-                  header_bytes
+                {:ok, data} = client.recv(socket, 8, _timeout = 2_000)
+                %{payload: rest, size: payload_length} = Util.plex!(data)
 
-                {:ok, payload} = client.recv(socket, payload_length, _timeout = 2_000)
+                remaining_payload_length = payload_length - byte_size(rest)
+                {:ok, payload} = read_remaining_payload.(remaining_payload_length)
 
                 case CSResponse.decode(payload) do
                   {:ok, %CSResponse.AwaitReply{}} ->
