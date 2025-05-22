@@ -169,6 +169,8 @@ defmodule Xander.ChainSync do
       ) do
     Logger.debug("starting chainsync")
     "ok banana" = start_chain_sync(client, socket, 0, client_module, data.state)
+    # TODO: address race condition that takes place in case the server replies
+    # while socket is in active mode and before the client has transitioned to the new_blocks state
     {:next_state, :new_blocks, data}
   end
 
@@ -342,6 +344,8 @@ defmodule Xander.ChainSync do
               {:ok, %AwaitReply{}} ->
                 Logger.debug("Awaiting reply")
                 :ok = setopts_lib(client).setopts(socket, active: :once)
+                # TODO: address race condition that takes place in case the server replies
+                # before the client has transitioned to the new state.
                 "ok banana"
 
               {:error, :incomplete_cbor_data} ->
