@@ -1,4 +1,7 @@
 defmodule Xander.ChainSync.Response do
+  @moduledoc """
+  This module is responsible for decoding CBOR responses and parsing them into Ouroboros-specific structs.
+  """
   alias Xander.Util
 
   require Logger
@@ -76,7 +79,10 @@ defmodule Xander.ChainSync.Response do
         end
 
       {:ok, [5, point, tip], _rest} ->
-        {:ok, %IntersectFound{point: point, tip: tip}}
+        with {:ok, parsed_point} <- parse_point(point),
+             {:ok, parsed_block} <- parse_block(tip) do
+          {:ok, %IntersectFound{point: parsed_point, tip: parsed_block}}
+        end
 
       {:ok, unknown_response, _rest} ->
         Logger.warning("Unknown response: #{inspect(unknown_response)}")

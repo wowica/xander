@@ -5,7 +5,7 @@ defmodule Xander.ChainSync do
   @active_n2c_versions [9, 10, 11, 12, 13, 14, 15, 16]
   @recv_timeout 5_000
 
-  alias Xander.ChainSync.Ledger
+  alias Xander.ChainSync.Intersection
   alias Xander.ChainSync.Ledger.IntersectionTarget
   alias Xander.ChainSync.Response, as: CSResponse
   alias Xander.ChainSync.Response.AwaitReply
@@ -147,62 +147,17 @@ defmodule Xander.ChainSync do
         :find_intersection,
         %__MODULE__{client: client, socket: socket, sync_from: sync_from} = data
       ) do
-    :ok = client.send(socket, Messages.next_request())
-
-    case client.recv(socket, 0, @recv_timeout) do
-      {:ok, intersection_response} ->
-        case CSResponse.parse_response(intersection_response) do
-          {:ok, %RollBackward{tip: tip}} ->
-            Logger.debug("First rollback: (#{tip.slot_number}, #{tip.hash})")
-
-            %IntersectionTarget{slot: target_slot, block_bytes: target_block_bytes} =
-              case sync_from do
-                :conway ->
-                  Ledger.conway_boundary_target()
-
-                {slot_number, block_hash} ->
-                  Ledger.custom_point_target(slot_number, block_hash)
-
-                _ ->
-                  Ledger.custom_point_target(tip.slot_number, tip.hash)
-              end
-
-            message = Messages.find_intersection(target_slot, target_block_bytes)
-            :ok = client.send(socket, message)
-
-            case client.recv(socket, 0, @recv_timeout) do
-              {:ok, intersection_response} ->
-                Logger.debug("Find intersection response successful")
-
-                case CSResponse.parse_response(intersection_response) do
-                  {:ok,
-                   %IntersectFound{
-                     point: [
-                       ^target_slot,
-                       %CBOR.Tag{tag: :bytes, value: ^target_block_bytes}
-                     ]
-                   }} ->
-                    # Start the actual chainsync messages
-                    actions = [{:next_event, :internal, :start_chain_sync}]
-                    {:keep_state, data, actions}
-
-                  {:error, _error} ->
-                    Logger.warning("Intersection not found. Disconnecting.")
-                    {:next_state, :disconnected, data}
-                end
-
-              {:error, reason} ->
-                Logger.warning("Find intersection response failed: #{inspect(reason)}")
-                {:next_state, :disconnected, data}
-            end
-
-          error ->
-            Logger.debug("Next request response failed: #{inspect(error)}")
-            {:next_state, :disconnected, data}
-        end
-
+    with {:ok, %IntersectionTarget{slot: slot, block_bytes: block_bytes}} <-
+           Intersection.find_target(client, socket, sync_from),
+         {:ok, %IntersectFound{point: point}} <-
+           Intersection.find_intersection(client, socket, slot, block_bytes) do
+      Logger.debug("Intersect found: (#{point.slot_number}, #{point.hash})")
+      # Start the actual chainsync messages
+      actions = [{:next_event, :internal, :start_chain_sync}]
+      {:keep_state, data, actions}
+    else
       {:error, reason} ->
-        Logger.debug("Next request response failed: #{inspect(reason)}")
+        Logger.error("Find intersection failed: #{inspect(reason)}")
         {:next_state, :disconnected, data}
     end
   end
