@@ -168,7 +168,7 @@ defmodule Xander.ChainSync do
         %__MODULE__{client: client, socket: socket, client_module: client_module} = data
       ) do
     Logger.debug("starting chainsync")
-    "ok banana" = start_chain_sync(client, socket, 0, client_module, data.state)
+    "ok banana" = start_chain_sync(client, socket, client_module, data.state)
     # TODO: address race condition that takes place in case the server replies
     # while socket is in active mode and before the client has transitioned to the new_blocks state
     {:next_state, :new_blocks, data}
@@ -206,6 +206,10 @@ defmodule Xander.ChainSync do
         Logger.debug("read payload on new block")
 
         case CSResponse.decode(combined_payload) do
+          {:ok, %AwaitReply{}} ->
+            :ok = setopts_lib(client).setopts(socket, active: :once)
+            :keep_state_and_data
+
           {:ok, %RollForward{header: header}} ->
             Logger.debug("decoded block perfectly")
 
@@ -241,10 +245,6 @@ defmodule Xander.ChainSync do
                 {:next_state, :disconnected, module_state}
             end
 
-          {:ok, %AwaitReply{}} ->
-            :ok = setopts_lib(client).setopts(socket, active: :once)
-            {:keep_state, module_state}
-
           {:ok, %RollBackward{point: point}} ->
             Logger.debug(
               "Calling client_module.handle_rollback with #{point.slot_number}, #{point.hash}"
@@ -272,7 +272,6 @@ defmodule Xander.ChainSync do
               client,
               socket,
               combined_payload,
-              _possibly_remove_this = 666,
               client_module,
               state
             )
@@ -291,7 +290,7 @@ defmodule Xander.ChainSync do
 
   # As part of the chainsync process, this function emits msgRequestNext
   # and waits for a subsequent msgRollbackward
-  defp start_chain_sync(client, socket, 0, client_module, state) do
+  defp start_chain_sync(client, socket, client_module, state) do
     :ok = client.send(socket, Messages.next_request())
     {:ok, header_bytes} = client.recv(socket, 8, @recv_timeout)
     <<_timestamp::big-32, _mode::1, _protocol_id::15, payload_length::big-16>> = header_bytes
@@ -305,7 +304,7 @@ defmodule Xander.ChainSync do
             :ok = client.send(socket, Messages.next_request())
 
             # Read the next message
-            read_next_message(client, socket, 0, client_module, state)
+            read_next_message(client, socket, client_module, state)
 
           {:error, reason} ->
             Logger.warning("Error decoding payload: #{inspect(reason)}")
@@ -320,7 +319,7 @@ defmodule Xander.ChainSync do
   end
 
   # Helper function to read the next message
-  defp read_next_message(client, socket, counter, client_module, state) do
+  defp read_next_message(client, socket, client_module, state) do
     # Read the header (8 bytes)
     case client.recv(socket, 8, @recv_timeout) do
       {:ok, header_bytes} ->
@@ -329,6 +328,13 @@ defmodule Xander.ChainSync do
         case client.recv(socket, payload_length, @recv_timeout) do
           {:ok, payload} ->
             case CSResponse.decode(payload) do
+              {:ok, %AwaitReply{}} ->
+                Logger.debug("Awaiting reply")
+                :ok = setopts_lib(client).setopts(socket, active: :once)
+                # TODO: address race condition that takes place in case the server replies
+                # before the client has transitioned to the new state.
+                "ok banana"
+
               {:ok, %RollForward{header: header}} ->
                 # This is the callback from the client module
                 case client_module.handle_block(
@@ -340,22 +346,15 @@ defmodule Xander.ChainSync do
                      ) do
                   {:ok, :next_block, _new_state} ->
                     :ok = client.send(socket, Messages.next_request())
-                    read_next_message(client, socket, counter + 1, client_module, state)
+                    read_next_message(client, socket, client_module, state)
 
                   {:ok, :stop} ->
                     :ok
                 end
 
-              {:ok, %AwaitReply{}} ->
-                Logger.debug("Awaiting reply")
-                :ok = setopts_lib(client).setopts(socket, active: :once)
-                # TODO: address race condition that takes place in case the server replies
-                # before the client has transitioned to the new state.
-                "ok banana"
-
               {:error, :incomplete_cbor_data} ->
                 # If decoding fails, try to read another message
-                read_next_message_continue(client, socket, payload, counter, client_module, state)
+                read_next_message_continue(client, socket, payload, client_module, state)
             end
 
           {:error, reason} ->
@@ -370,7 +369,7 @@ defmodule Xander.ChainSync do
   end
 
   # Helper function to continue reading if the first attempt fails
-  defp read_next_message_continue(client, socket, first_payload, counter, client_module, state) do
+  defp read_next_message_continue(client, socket, first_payload, client_module, state) do
     # Read another header
     case client.recv(socket, 8, @recv_timeout) do
       {:ok, header_bytes} ->
@@ -393,7 +392,7 @@ defmodule Xander.ChainSync do
                      ) do
                   {:ok, :next_block, _new_state} ->
                     :ok = client.send(socket, Messages.next_request())
-                    read_next_message(client, socket, counter + 1, client_module, state)
+                    read_next_message(client, socket, client_module, state)
 
                   {:ok, :stop} ->
                     :ok
@@ -404,7 +403,6 @@ defmodule Xander.ChainSync do
                   client,
                   socket,
                   combined_payload,
-                  counter,
                   client_module,
                   state
                 )
