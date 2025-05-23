@@ -20,11 +20,11 @@ defmodule Xander.ChainSync.Response do
   end
 
   defmodule Block do
-    defstruct [:slot_number, :hash, :bytes]
+    defstruct [:bytes, :hash, :slot_number]
   end
 
   defmodule Header do
-    defstruct [:block_number, :bytes]
+    defstruct [:block_body_size, :block_number, :bytes]
   end
 
   defmodule IntersectFound do
@@ -64,12 +64,9 @@ defmodule Xander.ChainSync.Response do
         {:ok, %AwaitReply{}}
 
       {:ok, [2, header, tip], _rest} ->
-        case parse_header(header) do
-          {:ok, parsed_header} ->
-            {:ok, %RollForward{header: parsed_header, tip: tip}}
-
-          error ->
-            error
+        with {:ok, parsed_header} <- parse_header(header),
+             {:ok, parsed_tip} <- parse_block(tip) do
+          {:ok, %RollForward{header: parsed_header, tip: parsed_tip}}
         end
 
       {:ok, [3, point, tip], _rest} ->
@@ -105,10 +102,15 @@ defmodule Xander.ChainSync.Response do
     } = header
 
     case CBOR.decode(header_bytes) do
-      {:ok, [_idk_what_this_is, [[[block_number | _] | _] | _] | _signature], _rest} ->
+      {:ok,
+       [
+         _idk_what_this_is,
+         [[[block_number, _, _, _, _, _, block_body_size | _] | _] | _] | _signature
+       ], _rest} ->
         {:ok,
          %Header{
            block_number: block_number,
+           block_body_size: block_body_size,
            bytes: header_bytes
          }}
 

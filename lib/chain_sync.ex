@@ -182,24 +182,28 @@ defmodule Xander.ChainSync do
       ) do
     Logger.debug("handling new block")
 
-    %{payload: rest, size: payload_length} = Util.plex!(data)
-
-    remaining_payload_length = payload_length - byte_size(rest)
+    %{payload: payload, size: payload_length} = Util.plex!(data)
+    remaining_payload_length = payload_length - byte_size(payload)
 
     # This ensures that if the entire payload has been read sent in data,
     # we don't try to read anymore.
     read_remaining_payload = fn
-      0 = _recv_payload_length ->
-        {:ok, rest}
+      current_payload, 0 ->
+        {:ok, current_payload}
 
-      recv_payload_length ->
-        client.recv(socket, recv_payload_length, @recv_timeout)
+      current_payload, recv_payload_length ->
+        case client.recv(socket, recv_payload_length, @recv_timeout) do
+          {:ok, additional_payload} ->
+            {:ok, current_payload <> additional_payload}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
     end
 
-    case read_remaining_payload.(remaining_payload_length) do
-      {:ok, payload} ->
+    case read_remaining_payload.(payload, remaining_payload_length) do
+      {:ok, combined_payload} ->
         Logger.debug("read payload on new block")
-        combined_payload = rest <> payload
 
         case CSResponse.decode(combined_payload) do
           {:ok, %RollForward{header: header}} ->
@@ -208,7 +212,7 @@ defmodule Xander.ChainSync do
             case client_module.handle_block(
                    %{
                      block_number: header.block_number,
-                     size: byte_size(header.bytes)
+                     size: header.block_body_size
                    },
                    state
                  ) do
@@ -216,12 +220,13 @@ defmodule Xander.ChainSync do
                 :ok = client.send(socket, Messages.next_request())
 
                 {:ok, data} = client.recv(socket, 8, @recv_timeout)
-                %{payload: rest, size: payload_length} = Util.plex!(data)
+                %{payload: payload, size: payload_length} = Util.plex!(data)
+                remaining_payload_length = payload_length - byte_size(payload)
 
-                remaining_payload_length = payload_length - byte_size(rest)
-                {:ok, payload} = read_remaining_payload.(remaining_payload_length)
+                {:ok, combined_payload} =
+                  read_remaining_payload.(payload, remaining_payload_length)
 
-                case CSResponse.decode(payload) do
+                case CSResponse.decode(combined_payload) do
                   {:ok, %AwaitReply{}} ->
                     # Response should always be [1] msgAwaitReply
                     :ok = setopts_lib(client).setopts(socket, active: :once)
@@ -329,7 +334,7 @@ defmodule Xander.ChainSync do
                 case client_module.handle_block(
                        %{
                          block_number: header.block_number,
-                         size: byte_size(header.bytes)
+                         size: header.block_body_size
                        },
                        state
                      ) do
@@ -382,7 +387,7 @@ defmodule Xander.ChainSync do
                 case client_module.handle_block(
                        %{
                          block_number: header.block_number,
-                         size: byte_size(header_bytes)
+                         size: header.block_body_size
                        },
                        state
                      ) do
