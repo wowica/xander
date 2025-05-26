@@ -5,6 +5,37 @@ defmodule Xander.ChainSync do
   @active_n2c_versions [9, 10, 11, 12, 13, 14, 15, 16]
   @recv_timeout 5_000
 
+  @doc """
+  Invoked when a new block is emitted. This callback is required.
+
+  Receives block information as argument and the current state of the handler.
+
+  Returning `{:ok, :next_block, new_state}` will request the next block once
+  it's made available.
+
+  Returning `{:close, new_state}` will close the connection to the node.
+  """
+  @callback handle_block(block :: map(), state) ::
+              {:ok, :next_block, new_state}
+              | {:close, new_state}
+            when state: term(), new_state: term()
+
+  @doc """
+  Invoked when a rollback event is emitted. This callback is optional.
+
+  Receives as argument a point and the state of the handler. The point is a
+  map with keys for `id` (block id) and a `slot`. This information can then
+  be used by the handler module to perform the necessary corrections.
+  For example, resetting all current known state past this point and then
+  rewriting it from future invokations of `c:handle_block/2`
+
+  Returning `{:ok, :next_block, new_state}` will request the next block once
+  it's made available. This is the only valid return value.
+  """
+  @callback handle_rollback(point :: map(), state) ::
+              {:ok, :next_block, new_state}
+            when state: term(), new_state: term()
+
   alias Xander.ChainSync.Intersection
   alias Xander.ChainSync.Ledger.IntersectionTarget
   alias Xander.ChainSync.Response, as: CSResponse
@@ -168,10 +199,36 @@ defmodule Xander.ChainSync do
         %__MODULE__{client: client, socket: socket, client_module: client_module} = data
       ) do
     Logger.debug("starting chainsync")
-    "ok banana" = start_chain_sync(client, socket, client_module, data.state)
-    # TODO: address race condition that takes place in case the server replies
-    # while socket is in active mode and before the client has transitioned to the new_blocks state
-    {:next_state, :new_blocks, data}
+
+    # TODO: move this stuff into a future Transport module
+    emit_initial_next_message = fn client, socket ->
+      with :ok <- client.send(socket, Messages.next_request()),
+           {:ok, header_bytes} <- client.recv(socket, 8, @recv_timeout),
+           <<_timestamp::big-32, _mode::1, _protocol_id::15, payload_length::big-16>> <-
+             header_bytes,
+           {:ok, payload} <- client.recv(socket, payload_length, @recv_timeout) do
+        CSResponse.decode(payload)
+      else
+        {:error, reason} ->
+          {:error, reason}
+      end
+    end
+
+    case emit_initial_next_message.(client, socket) do
+      {:ok, %RollBackward{point: point}} ->
+        Logger.debug("Rolling back to (#{point.slot_number}, #{point.hash})")
+
+        :ok = client.send(socket, Messages.next_request())
+
+        # Read the next message
+        read_until_sync(client, socket, client_module, data)
+        {:next_state, :new_blocks, data}
+
+      {:error, reason} ->
+        Logger.warning("Error decoding payload: #{inspect(reason)}")
+
+        :keep_state_and_data
+    end
   end
 
   def new_blocks(
@@ -241,7 +298,9 @@ defmodule Xander.ChainSync do
                     :keep_state_and_data
                 end
 
-              {:ok, :stop} ->
+              {:close, _new_state} ->
+                Logger.debug("Disconnecting from node")
+                :ok = client.close(socket)
                 {:next_state, :disconnected, module_state}
             end
 
@@ -288,38 +347,8 @@ defmodule Xander.ChainSync do
     end
   end
 
-  # As part of the chainsync process, this function emits msgRequestNext
-  # and waits for a subsequent msgRollbackward
-  defp start_chain_sync(client, socket, client_module, state) do
-    :ok = client.send(socket, Messages.next_request())
-    {:ok, header_bytes} = client.recv(socket, 8, @recv_timeout)
-    <<_timestamp::big-32, _mode::1, _protocol_id::15, payload_length::big-16>> = header_bytes
-
-    case client.recv(socket, payload_length, @recv_timeout) do
-      {:ok, payload} ->
-        case CSResponse.decode(payload) do
-          {:ok, %RollBackward{point: point}} ->
-            Logger.debug("Rolling back to (#{point.slot_number}, #{point.hash})")
-
-            :ok = client.send(socket, Messages.next_request())
-
-            # Read the next message
-            read_next_message(client, socket, client_module, state)
-
-          {:error, reason} ->
-            Logger.warning("Error decoding payload: #{inspect(reason)}")
-
-            :keep_state_and_data
-        end
-
-      {:error, reason} ->
-        Logger.warning("Error reading socket: #{inspect(reason)}")
-        {:error, reason}
-    end
-  end
-
   # Helper function to read the next message
-  defp read_next_message(client, socket, client_module, state) do
+  defp read_until_sync(client, socket, client_module, state) do
     # Read the header (8 bytes)
     case client.recv(socket, 8, @recv_timeout) do
       {:ok, header_bytes} ->
@@ -328,12 +357,20 @@ defmodule Xander.ChainSync do
         case client.recv(socket, payload_length, @recv_timeout) do
           {:ok, payload} ->
             case CSResponse.decode(payload) do
+              # When we receive a msgAwaitReply, this means we have reached
+              # the tip and are done with the sync.
               {:ok, %AwaitReply{}} ->
                 Logger.debug("Awaiting reply")
+                # This is the base case of the recursion and the function no
+                # longer recurses. It sets the socket to active mode so that
+                # data ingestion continues from the "new_blocks" state.
+                # The state transition from the "catching up" state to
+                # "new_blocks" state occurs in the caller of this function.
+
+                # TODO: address race condition that takes place in case the
+                # node replies after socket is set to active but before the
+                # client has transitioned to the new state.
                 :ok = setopts_lib(client).setopts(socket, active: :once)
-                # TODO: address race condition that takes place in case the server replies
-                # before the client has transitioned to the new state.
-                "ok banana"
 
               {:ok, %RollForward{header: header}} ->
                 # This is the callback from the client module
@@ -346,10 +383,12 @@ defmodule Xander.ChainSync do
                      ) do
                   {:ok, :next_block, _new_state} ->
                     :ok = client.send(socket, Messages.next_request())
-                    read_next_message(client, socket, client_module, state)
+                    read_until_sync(client, socket, client_module, state)
 
-                  {:ok, :stop} ->
-                    :ok
+                  {:close, _new_state} ->
+                    Logger.debug("Disconnecting from node")
+                    :ok = client.close(socket)
+                    {:next_state, :disconnected, state}
                 end
 
               {:error, :incomplete_cbor_data} ->
@@ -392,7 +431,7 @@ defmodule Xander.ChainSync do
                      ) do
                   {:ok, :next_block, _new_state} ->
                     :ok = client.send(socket, Messages.next_request())
-                    read_next_message(client, socket, client_module, state)
+                    read_until_sync(client, socket, client_module, state)
 
                   {:ok, :stop} ->
                     :ok
@@ -453,6 +492,11 @@ defmodule Xander.ChainSync do
 
   defmacro __using__(_opts) do
     quote do
+      @behaviour Xander.ChainSync
+
+      def handle_rollback(_point, state), do: {:ok, :next_block, state}
+      defoverridable handle_rollback: 2
+
       def child_spec(opts) do
         %{
           id: __MODULE__,
