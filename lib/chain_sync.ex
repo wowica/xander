@@ -173,6 +173,10 @@ defmodule Xander.ChainSync do
     end
   end
 
+  # The catching_up state is when the client is catching up to the tip of the chain.
+  # In this state, it finds the intersection point and then starts reading the blocks
+  # until it reaches the tip of the chain - this happens when the client receives
+  # a msgAwaitReply response.
   def catching_up(
         :internal,
         :find_intersection,
@@ -231,6 +235,8 @@ defmodule Xander.ChainSync do
     end
   end
 
+  # The new_blocks state is when the client has caught up to the tip of the chain
+  # and passively receives new blocks from the node after msgAwaitReply responses.
   def new_blocks(
         :info,
         {:tcp, socket, data},
