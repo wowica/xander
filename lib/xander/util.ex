@@ -6,13 +6,12 @@ defmodule Xander.Util do
   ## Examples
 
       iex> Xander.Util.plex(<<0, 0, 0, 0, 1, 2, 0, 3, 97, 98, 99>>)
-      {:ok, %{size: <<0, 3>>, payload: "abc", protocol_id: <<1, 2>>}}
+      {:ok, %{size: 3, payload: "abc", protocol_id: 258}}
 
   """
   @spec plex(binary() | nil) :: {:ok, map()} | {:error, atom()}
   def plex(msg) when is_binary(msg) and byte_size(msg) >= 8 do
-    <<_timestamp::binary-size(4), protocol_id::binary-size(2), payload_size::binary-size(2),
-      payload::binary>> = msg
+    <<_timestamp::big-32, protocol_id::big-16, payload_size::big-16, payload::binary>> = msg
 
     {:ok, %{payload: payload, protocol_id: protocol_id, size: payload_size}}
   end
@@ -32,7 +31,7 @@ defmodule Xander.Util do
   ## Examples
 
       iex> Xander.Util.plex!(<<0, 0, 0, 0, 1, 2, 0, 3, 97, 98, 99>>)
-      %{payload: <<97, 98, 99>>, protocol_id: <<1, 2>>, size: <<0, 3>>}
+      %{payload: "abc", protocol_id: 258, size: 3}
 
   """
   @spec plex!(binary()) :: map()
