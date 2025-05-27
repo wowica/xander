@@ -239,7 +239,7 @@ defmodule Xander.ChainSync do
   # and passively receives new blocks from the node after msgAwaitReply responses.
   def new_blocks(
         :info,
-        {:tcp, socket, data},
+        {_tcp_or_ssl, socket, data},
         %__MODULE__{client: client, socket: socket, client_module: client_module, state: state} =
           module_state
       ) do
