@@ -31,6 +31,11 @@ defmodule Xander.Messages do
   # https://datatracker.ietf.org/doc/html/rfc8949#embedded-di
   @encoded_cbor_tag 24
 
+  # See the CDDL for details on mapping of messages to numbers.
+  # https://github.com/IntersectMBO/ouroboros-network/blob/main/ouroboros-network-protocols/cddl/specs/chain-sync.cddl
+  @msg_next_request [0]
+  @msg_find_intersection 4
+
   @doc """
   Acquires a snapshot of the mempool, allowing the protocol to make queries.
 
@@ -154,7 +159,7 @@ defmodule Xander.Messages do
   end
 
   def next_request() do
-    bitstring_payload = CBOR.encode([0])
+    bitstring_payload = CBOR.encode(@msg_next_request)
     header(@mini_protocols.chain_sync, bitstring_payload) <> bitstring_payload
   end
 
@@ -164,7 +169,7 @@ defmodule Xander.Messages do
       [slot_no, %CBOR.Tag{tag: :bytes, value: block_hash}]
     ]
 
-    bitstring_payload = CBOR.encode([4, points])
+    bitstring_payload = CBOR.encode([@msg_find_intersection, points])
 
     header(@mini_protocols.chain_sync, bitstring_payload) <> bitstring_payload
   end
