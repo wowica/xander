@@ -3,6 +3,8 @@ defmodule Xander.ChainSync.Ledger do
   Provides functionality for chain synchronization intersection points.
   """
 
+  # TODO: Consider re-using Xander.ChainSync.Response.Block since it's the same shape as IntersectionTarget.
+  # Leaving it here for now for semantics.
   defmodule IntersectionTarget do
     @moduledoc """
     Represents a chain intersection point with slot number, block hash, and block bytes.
