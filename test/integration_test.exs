@@ -222,27 +222,6 @@ defmodule Xander.Integration.TransactionTest do
     socket_path: socket_path,
     supervisor_pid: _supervisor_pid
   } do
-    # Set up network parameters
-    protocol_params = Path.join(tmp_dir, "protocol-params.json")
-
-    # Get protocol parameters
-    case run_cardano_cli([
-           "query",
-           "protocol-parameters",
-           "--socket-path",
-           socket_path,
-           "--out-file",
-           protocol_params
-         ]) do
-      {_output, 0} ->
-        IO.puts("Successfully retrieved protocol parameters")
-
-      {error, 1} ->
-        IO.puts("Failed to retrieve protocol parameters: #{error}")
-        # Create a dummy protocol parameters file
-        File.write!(protocol_params, "{}")
-    end
-
     # Define the transaction chain with derived payment keys
     transaction_chain = [
       {0, @utxo0, @address0, @address1, Enum.at(payment_keys, 0)},
@@ -346,4 +325,115 @@ defmodule Xander.Integration.TransactionTest do
     # Wait for all responses
     _responses = Enum.map(tasks, &Task.await(&1, 30_000))
   end
+
+  # @tag :integration
+  # test "can sync with the chain", %{
+  #   tmp_dir: tmp_dir,
+  #   payment_keys: payment_keys,
+  #   socket_path: socket_path,
+  #   supervisor_pid: _supervisor_pid
+  # } do
+  #   # Define the transaction chain with derived payment keys
+  #   transaction_chain = [
+  #     {0, @utxo0, @address0, @address1, Enum.at(payment_keys, 0)},
+  #     {1, @utxo1, @address1, @address2, Enum.at(payment_keys, 1)},
+  #     {2, @utxo2, @address2, @address3, Enum.at(payment_keys, 2)},
+  #     {3, @utxo3, @address3, @address4, Enum.at(payment_keys, 3)},
+  #     {4, @utxo4, @address4, @address0, Enum.at(payment_keys, 4)}
+  #   ]
+
+  #   # First, build and sign all transactions except the first one
+  #   signed_transactions =
+  #     Enum.map(transaction_chain, fn {index, utxo, from_addr, to_addr, signing_key} ->
+  #       # Create transaction files
+  #       tx_out = Path.join(tmp_dir, "tx#{index}.out")
+  #       tx_signed = Path.join(tmp_dir, "tx#{index}.signed")
+
+  #       # Build the transaction
+  #       case run_cardano_cli([
+  #              "transaction",
+  #              "build",
+  #              "--socket-path",
+  #              socket_path,
+  #              "--tx-in",
+  #              utxo,
+  #              "--tx-out",
+  #              "#{to_addr} 1000000",
+  #              "--change-address",
+  #              from_addr,
+  #              "--out-file",
+  #              tx_out
+  #            ]) do
+  #         {_output, 0} ->
+  #           IO.puts("Successfully built transaction #{index}")
+
+  #         {error, 1} ->
+  #           IO.puts("Failed to build transaction #{index}: #{error}")
+  #           # Create a dummy transaction file
+  #           File.write!(tx_out, "{}")
+  #       end
+
+  #       # Sign the transaction
+  #       case run_cardano_cli([
+  #              "transaction",
+  #              "sign",
+  #              "--tx-body-file",
+  #              tx_out,
+  #              "--signing-key-file",
+  #              signing_key,
+  #              "--out-file",
+  #              tx_signed
+  #            ]) do
+  #         {_output, 0} ->
+  #           IO.puts("Successfully signed transaction #{index}")
+
+  #         {error, 1} ->
+  #           IO.puts("Failed to sign transaction #{index}: #{error}")
+  #           # Create a dummy signed transaction file
+  #           File.write!(tx_signed, "{}")
+  #       end
+
+  #       # Read the signed transaction
+  #       tx_json = File.read!(tx_signed)
+  #       cbor_hex_pattern = ~r/"cborHex"\s*:\s*"([^"]+)"/
+
+  #       case Regex.run(cbor_hex_pattern, tx_json) do
+  #         [_, tx_cbor] ->
+  #           IO.puts("Successfully extracted cborHex from transaction file #{index}")
+  #           {index, tx_cbor, tx_signed}
+
+  #         _ ->
+  #           IO.puts("Failed to extract cborHex from transaction file #{index}")
+  #           {index, nil, tx_signed}
+  #       end
+  #     end)
+
+  #   # Submit all transactions in parallel and collect responses
+  #   tasks =
+  #     Enum.map(signed_transactions, fn {index, tx_cbor, _tx_signed} ->
+  #       Task.async(fn ->
+  #         case Xander.Transaction.send(tx_cbor) do
+  #           {:accepted, tx_id} ->
+  #             IO.puts("Received successful response for transaction #{index}: #{inspect(tx_id)}")
+
+  #             assert tx_id == Xander.Transaction.Hash.get_id(tx_cbor)
+  #             {index, :ok}
+
+  #           {:rejected, reason} ->
+  #             IO.puts("Transaction #{index} was rejected: #{inspect(reason)}")
+  #             assert false
+
+  #           {:error, error} ->
+  #             IO.puts("Failed to submit transaction #{index} with Xander: #{error}")
+  #             # In CI, we'll just pass the test since we can't actually submit transactions
+  #             IO.puts("Skipping actual transaction submission check in CI environment")
+  #             assert true
+  #             {index, :error}
+  #         end
+  #       end)
+  #     end)
+
+  #   # Wait for all responses
+  #   _responses = Enum.map(tasks, &Task.await(&1, 30_000))
+  # end
 end
