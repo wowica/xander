@@ -326,114 +326,60 @@ defmodule Xander.Integration.TransactionTest do
     _responses = Enum.map(tasks, &Task.await(&1, 30_000))
   end
 
-  # @tag :integration
-  # test "can sync with the chain", %{
-  #   tmp_dir: tmp_dir,
-  #   payment_keys: payment_keys,
-  #   socket_path: socket_path,
-  #   supervisor_pid: _supervisor_pid
-  # } do
-  #   # Define the transaction chain with derived payment keys
-  #   transaction_chain = [
-  #     {0, @utxo0, @address0, @address1, Enum.at(payment_keys, 0)},
-  #     {1, @utxo1, @address1, @address2, Enum.at(payment_keys, 1)},
-  #     {2, @utxo2, @address2, @address3, Enum.at(payment_keys, 2)},
-  #     {3, @utxo3, @address3, @address4, Enum.at(payment_keys, 3)},
-  #     {4, @utxo4, @address4, @address0, Enum.at(payment_keys, 4)}
-  #   ]
+  @tag :integration
+  test "can sync with the chain", %{
+    tmp_dir: tmp_dir,
+    payment_keys: payment_keys,
+    socket_path: socket_path,
+    supervisor_pid: _supervisor_pid
+  } do
+    # Test module that implements the ChainSync behaviour
+    defmodule TestChainSync do
+      use Xander.ChainSync
 
-  #   # First, build and sign all transactions except the first one
-  #   signed_transactions =
-  #     Enum.map(transaction_chain, fn {index, utxo, from_addr, to_addr, signing_key} ->
-  #       # Create transaction files
-  #       tx_out = Path.join(tmp_dir, "tx#{index}.out")
-  #       tx_signed = Path.join(tmp_dir, "tx#{index}.signed")
+      def handle_block(block, %Xander.ChainSync{state: state}) do
+        # Keep track of blocks we've seen
+        blocks = Keyword.get(state, :blocks, [])
+        new_state = Keyword.put(state, :blocks, [block | blocks])
 
-  #       # Build the transaction
-  #       case run_cardano_cli([
-  #              "transaction",
-  #              "build",
-  #              "--socket-path",
-  #              socket_path,
-  #              "--tx-in",
-  #              utxo,
-  #              "--tx-out",
-  #              "#{to_addr} 1000000",
-  #              "--change-address",
-  #              from_addr,
-  #              "--out-file",
-  #              tx_out
-  #            ]) do
-  #         {_output, 0} ->
-  #           IO.puts("Successfully built transaction #{index}")
+        # Continue syncing after 3 blocks
+        if length(blocks) >= 2 do
+          {:close, new_state}
+        else
+          {:ok, :next_block, new_state}
+        end
+      end
+    end
 
-  #         {error, 1} ->
-  #           IO.puts("Failed to build transaction #{index}: #{error}")
-  #           # Create a dummy transaction file
-  #           File.write!(tx_out, "{}")
-  #       end
+    # Trap exit of ChainSync process
+    Process.flag(:trap_exit, true)
 
-  #       # Sign the transaction
-  #       case run_cardano_cli([
-  #              "transaction",
-  #              "sign",
-  #              "--tx-body-file",
-  #              tx_out,
-  #              "--signing-key-file",
-  #              signing_key,
-  #              "--out-file",
-  #              tx_signed
-  #            ]) do
-  #         {_output, 0} ->
-  #           IO.puts("Successfully signed transaction #{index}")
+    {:ok, pid} =
+      Xander.ChainSync.start_link(
+        TestChainSync,
+        network: :yaci_devkit,
+        path: socket_path,
+        type: :socket,
+        sync_from: :origin
+      )
 
-  #         {error, 1} ->
-  #           IO.puts("Failed to sign transaction #{index}: #{error}")
-  #           # Create a dummy signed transaction file
-  #           File.write!(tx_signed, "{}")
-  #       end
+    # Wait for the process to finish
+    Process.monitor(pid)
 
-  #       # Read the signed transaction
-  #       tx_json = File.read!(tx_signed)
-  #       cbor_hex_pattern = ~r/"cborHex"\s*:\s*"([^"]+)"/
+    receive do
+      {:EXIT, ^pid, reason} ->
+        {:normal, %Xander.ChainSync{state: [blocks: blocks]}} = reason
 
-  #       case Regex.run(cbor_hex_pattern, tx_json) do
-  #         [_, tx_cbor] ->
-  #           IO.puts("Successfully extracted cborHex from transaction file #{index}")
-  #           {index, tx_cbor, tx_signed}
+        assert length(blocks) == 3
 
-  #         _ ->
-  #           IO.puts("Failed to extract cborHex from transaction file #{index}")
-  #           {index, nil, tx_signed}
-  #       end
-  #     end)
-
-  #   # Submit all transactions in parallel and collect responses
-  #   tasks =
-  #     Enum.map(signed_transactions, fn {index, tx_cbor, _tx_signed} ->
-  #       Task.async(fn ->
-  #         case Xander.Transaction.send(tx_cbor) do
-  #           {:accepted, tx_id} ->
-  #             IO.puts("Received successful response for transaction #{index}: #{inspect(tx_id)}")
-
-  #             assert tx_id == Xander.Transaction.Hash.get_id(tx_cbor)
-  #             {index, :ok}
-
-  #           {:rejected, reason} ->
-  #             IO.puts("Transaction #{index} was rejected: #{inspect(reason)}")
-  #             assert false
-
-  #           {:error, error} ->
-  #             IO.puts("Failed to submit transaction #{index} with Xander: #{error}")
-  #             # In CI, we'll just pass the test since we can't actually submit transactions
-  #             IO.puts("Skipping actual transaction submission check in CI environment")
-  #             assert true
-  #             {index, :error}
-  #         end
-  #       end)
-  #     end)
-
-  #   # Wait for all responses
-  #   _responses = Enum.map(tasks, &Task.await(&1, 30_000))
-  # end
+        # Blocks should be contiguous
+        blocks
+        |> Enum.with_index()
+        |> Enum.all?(fn {block, index} ->
+          is_integer(block.block_number) and
+            block.block_number == Enum.at(blocks, 0).block_number - index
+        end)
+        |> assert()
+    end
+  end
 end

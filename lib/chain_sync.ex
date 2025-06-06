@@ -61,7 +61,7 @@ defmodule Xander.ChainSync do
     :socket,
     :network,
     queue: :queue.new(),
-    state: %{}
+    state: []
   ]
 
   @doc """
@@ -125,13 +125,13 @@ defmodule Xander.ChainSync do
 
       {:error, reason} ->
         Logger.error("Error reaching socket #{inspect(reason)}")
-        {:next_state, :disconnected, data}
+        {:stop, {:normal, data}, data}
     end
   end
 
   def disconnected({:call, from}, _command, data) do
     actions = [{:reply, from, {:error, :disconnected}}]
-    {:keep_state, data, actions}
+    {:stop, {:normal, data}, data, actions}
   end
 
   def connected(
@@ -200,7 +200,8 @@ defmodule Xander.ChainSync do
   def catching_up(
         :internal,
         :start_chain_sync,
-        %__MODULE__{client: client, socket: socket, client_module: client_module} = data
+        %__MODULE__{client: client, socket: socket, client_module: client_module, state: state} =
+          data
       ) do
     Logger.debug("starting chainsync")
 
@@ -225,13 +226,45 @@ defmodule Xander.ChainSync do
         :ok = client.send(socket, Messages.next_request())
 
         # Read the next message
-        read_until_sync(client, socket, client_module, data)
+        case read_until_sync(client, socket, client_module, data) do
+          :ok ->
+            {:next_state, :new_blocks, data}
+
+          {:error, :closed} ->
+            {:stop, {:normal, data}, data}
+
+          {:error, reason} ->
+            Logger.error("Error during sync: #{inspect(reason)}")
+            {:stop, {:normal, data}, data}
+        end
+
+      {:ok, %RollForward{header: header}} ->
+        Logger.debug("Rolling forward with block #{header.block_number}")
+
+        case client_module.handle_block(
+               %{
+                 block_number: header.block_number,
+                 size: header.block_body_size
+               },
+               state
+             ) do
+          {:ok, :next_block, new_state} ->
+            :ok = client.send(socket, Messages.next_request())
+            {:keep_state, %{data | state: new_state}}
+
+          {:close, new_state} ->
+            :ok = client.close(socket)
+            {:stop, {:normal, %{data | state: new_state}}, %{data | state: new_state}}
+        end
+
+      {:ok, %AwaitReply{}} ->
+        Logger.debug("Caught up to tip, awaiting new blocks")
+        :ok = setopts_lib(client).setopts(socket, active: :once)
         {:next_state, :new_blocks, data}
 
       {:error, reason} ->
         Logger.warning("Error decoding payload: #{inspect(reason)}")
-
-        :keep_state_and_data
+        {:stop, {:normal, data}, data}
     end
   end
 
@@ -281,9 +314,9 @@ defmodule Xander.ChainSync do
                      block_number: header.block_number,
                      size: header.block_body_size
                    },
-                   state
+                   module_state
                  ) do
-              {:ok, :next_block, _new_state} ->
+              {:ok, :next_block, new_state} ->
                 :ok = client.send(socket, Messages.next_request())
 
                 {:ok, data} = client.recv(socket, 8, @recv_timeout)
@@ -297,17 +330,17 @@ defmodule Xander.ChainSync do
                   {:ok, %AwaitReply{}} ->
                     # Response should always be [1] msgAwaitReply
                     :ok = setopts_lib(client).setopts(socket, active: :once)
-                    :keep_state_and_data
+                    {:keep_state, %{module_state | state: new_state}}
 
                   error ->
                     Logger.warning("Error decoding next request: #{inspect(error)}")
-                    :keep_state_and_data
+                    {:keep_state, %{module_state | state: new_state}}
                 end
 
-              {:close, _new_state} ->
+              {:close, new_state} ->
                 Logger.debug("Disconnecting from node")
                 :ok = client.close(socket)
-                {:next_state, :disconnected, module_state}
+                {:stop, {:normal, %{module_state | state: new_state}}}
             end
 
           {:ok, %RollBackward{point: point}} ->
@@ -322,10 +355,10 @@ defmodule Xander.ChainSync do
                    },
                    state
                  ) do
-              {:ok, :next_block, _new_state} ->
+              {:ok, :next_block, new_state} ->
                 :ok = client.send(socket, Messages.next_request())
                 :ok = setopts_lib(client).setopts(socket, active: :once)
-                :keep_state_and_data
+                {:keep_state, %{module_state | state: new_state}}
 
               {:ok, :stop} ->
                 {:next_state, :disconnected, module_state}
@@ -345,6 +378,7 @@ defmodule Xander.ChainSync do
 
           unknown_response ->
             Logger.debug("Unknown message: #{inspect(unknown_response)}")
+            :keep_state_and_data
         end
 
       {:error, reason} ->
@@ -370,7 +404,7 @@ defmodule Xander.ChainSync do
                 # This is the base case of the recursion and the function no
                 # longer recurses. It sets the socket to active mode so that
                 # data ingestion continues from the "new_blocks" state.
-                # The state transition from the "catching up" state to
+                # The state transition from the "catching up" state to
                 # "new_blocks" state occurs in the caller of this function.
 
                 # TODO: address race condition that takes place in case the
