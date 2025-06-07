@@ -131,7 +131,6 @@ defmodule Xander.ChainSync do
 
   def disconnected({:call, from}, _command, data) do
     actions = [{:reply, from, {:error, :disconnected}}]
-    # {:keep_state, data, actions}
     {:stop, {:normal, data}, data, actions}
   end
 
