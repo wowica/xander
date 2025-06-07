@@ -356,7 +356,7 @@ defmodule Xander.ChainSync do
                    },
                    state
                  ) do
-              {:ok, :next_block, new_state} ->
+              {:ok, :next_block, _new_state} ->
                 :ok = client.send(socket, Messages.next_request())
                 :ok = setopts_lib(client).setopts(socket, active: :once)
                 :keep_state_and_data
