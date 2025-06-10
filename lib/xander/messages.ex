@@ -165,9 +165,16 @@ defmodule Xander.Messages do
 
   # Must be called second on ChainSync
   def find_intersection(slot_no, block_hash) do
-    points = [
-      [slot_no, %CBOR.Tag{tag: :bytes, value: block_hash}]
-    ]
+    points =
+      if block_hash == nil do
+        # block_hash nil means sync from genesis.
+        # empty point must be given to find_intersection
+        [[]]
+      else
+        [
+          [slot_no, %CBOR.Tag{tag: :bytes, value: block_hash}]
+        ]
+      end
 
     bitstring_payload = CBOR.encode([@msg_find_intersection, points])
 

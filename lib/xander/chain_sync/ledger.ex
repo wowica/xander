@@ -32,4 +32,8 @@ defmodule Xander.ChainSync.Ledger do
 
     %IntersectionTarget{slot: slot_number, block_hash: block_hash, block_bytes: block_bytes}
   end
+
+  def genesis_target do
+    %IntersectionTarget{slot: nil, block_hash: nil, block_bytes: nil}
+  end
 end
