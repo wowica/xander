@@ -102,6 +102,9 @@ defmodule Xander.ChainSync.Response do
     } = header
 
     case CBOR.decode(header_bytes) do
+      # This block header is conway era ONLY.
+      # Once new eras are supported (Babbage, Shelley, Byron), then
+      # additional patterns for parsing the header will need to be added.
       {:ok,
        [
          _idk_what_this_is,
@@ -113,6 +116,10 @@ defmodule Xander.ChainSync.Response do
            block_body_size: block_body_size,
            bytes: header_bytes
          }}
+
+      {:ok, _unsupported_era, _rest} ->
+        Logger.error("Could not parse block. Only conway era formats are currently supported.")
+        {:error, :unsupported_era}
 
       {:error, reason} ->
         {:error, reason}
