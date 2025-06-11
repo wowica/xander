@@ -90,7 +90,15 @@ defmodule Xander.ChainSync do
       state: state
     }
 
-    :gen_statem.start_link({:local, __MODULE__}, __MODULE__, data, [])
+    if sync_from && sync_from == :origin && network != :yaci_devkit do
+      Logger.error(
+        "Syncing from origin is only supported on the yaci_devkit network when create-node is used with the --era conway flag."
+      )
+
+      :ignore
+    else
+      :gen_statem.start_link({:local, __MODULE__}, __MODULE__, data, [])
+    end
   end
 
   @impl true
@@ -184,9 +192,8 @@ defmodule Xander.ChainSync do
       ) do
     with {:ok, %IntersectionTarget{slot: slot, block_bytes: block_bytes}} <-
            Intersection.find_target(client, socket, sync_from),
-         {:ok, %IntersectFound{point: point}} <-
+         {:ok, %IntersectFound{}} <-
            Intersection.find_intersection(client, socket, slot, block_bytes) do
-      Logger.debug("Intersect found: (#{point.slot_number}, #{point.hash})")
       # Start the actual chainsync messages
       actions = [{:next_event, :internal, :start_chain_sync}]
       {:keep_state, data, actions}
@@ -200,7 +207,7 @@ defmodule Xander.ChainSync do
   def catching_up(
         :internal,
         :start_chain_sync,
-        %__MODULE__{client: client, socket: socket, client_module: client_module, state: state} =
+        %__MODULE__{client: client, socket: socket, client_module: client_module} =
           data
       ) do
     Logger.debug("starting chainsync")
@@ -220,9 +227,7 @@ defmodule Xander.ChainSync do
     end
 
     case emit_initial_next_message.(client, socket) do
-      {:ok, %RollBackward{point: point}} ->
-        Logger.debug("Rolling back to (#{point.slot_number}, #{point.hash})")
-
+      {:ok, %RollBackward{}} ->
         :ok = client.send(socket, Messages.next_request())
 
         # Read the next message
@@ -238,29 +243,37 @@ defmodule Xander.ChainSync do
             {:stop, {:normal, data}, data}
         end
 
-      {:ok, %RollForward{header: header}} ->
-        Logger.debug("Rolling forward with block #{header.block_number}")
+      ### According to the spec, these type responses below (RollForward and AwaitReply) should never happen upon
+      ### sending of the initial MsgRequestNext.
+      ### See page 22 of https://ouroboros-network.cardano.intersectmbo.org/pdfs/network-spec/network-spec.pdf
+      ###
+      ### > (...) Whenever the server replies with MsgIntersectFound, the client can expect
+      ### > the next update (i.e. a replay to MsgRequestNext) to be MsgRollBackward to the specified pointintersect
+      ### > (which makes handling state updates on the client side easier).
 
-        case client_module.handle_block(
-               %{
-                 block_number: header.block_number,
-                 size: header.block_body_size
-               },
-               state
-             ) do
-          {:ok, :next_block, new_state} ->
-            :ok = client.send(socket, Messages.next_request())
-            {:keep_state, %{data | state: new_state}}
+      # {:ok, %RollForward{header: header}} ->
+      #   Logger.debug("Rolling forward with block #{header.block_number}")
 
-          {:close, new_state} ->
-            :ok = client.close(socket)
-            {:stop, {:normal, %{data | state: new_state}}, %{data | state: new_state}}
-        end
+      #   case client_module.handle_block(
+      #          %{
+      #            block_number: header.block_number,
+      #            size: header.block_body_size
+      #          },
+      #          state
+      #        ) do
+      #     {:ok, :next_block, new_state} ->
+      #       :ok = client.send(socket, Messages.next_request())
+      #       {:keep_state, %{data | state: new_state}}
 
-      {:ok, %AwaitReply{}} ->
-        Logger.debug("Caught up to tip, awaiting new blocks")
-        :ok = setopts_lib(client).setopts(socket, active: :once)
-        {:next_state, :new_blocks, data}
+      #     {:close, new_state} ->
+      #       :ok = client.close(socket)
+      #       {:stop, {:normal, %{data | state: new_state}}, %{data | state: new_state}}
+      #   end
+
+      # {:ok, %AwaitReply{}} ->
+      #   Logger.debug("Caught up to tip, awaiting new blocks")
+      #   :ok = setopts_lib(client).setopts(socket, active: :once)
+      #   {:next_state, :new_blocks, data}
 
       {:error, reason} ->
         Logger.warning("Error decoding payload: #{inspect(reason)}")
