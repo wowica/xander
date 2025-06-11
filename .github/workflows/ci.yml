@@ -165,8 +165,8 @@ jobs:
           pkill -f yaci-devkit || true
           
           # Start Yaci DevKit with verbose output and use pre-downloaded components
-          ## Looking into how to pass --era conway flag to yaci-devkit
-          ## https://github.com/bloxbean/yaci-devkit/issues/127
+          # Defaults to emitting blocks in conway era format, which is the only
+          # era currently supported by Xander.
           nohup yaci-devkit up > yaci-devkit.log 2>&1 &
           
           # Save the process ID
