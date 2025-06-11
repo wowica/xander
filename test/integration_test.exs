@@ -363,8 +363,8 @@ defmodule Xander.Integration.TransactionTest do
         sync_from: :origin
       )
 
-    # Wait for the process to finish
-    Process.monitor(pid)
+    # Terminal the process
+    Process.exit(pid, :normal)
 
     receive do
       {:EXIT, ^pid, reason} ->
