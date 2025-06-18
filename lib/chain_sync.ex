@@ -61,7 +61,7 @@ defmodule Xander.ChainSync do
     :socket,
     :network,
     queue: :queue.new(),
-    state: %{}
+    state: []
   ]
 
   @doc """
@@ -90,7 +90,15 @@ defmodule Xander.ChainSync do
       state: state
     }
 
-    :gen_statem.start_link({:local, __MODULE__}, __MODULE__, data, [])
+    if sync_from && sync_from == :origin && network != :yaci_devkit do
+      Logger.error(
+        "Syncing from origin is only supported on the yaci_devkit network when create-node is used with the --era conway flag."
+      )
+
+      :ignore
+    else
+      :gen_statem.start_link({:local, __MODULE__}, __MODULE__, data, [])
+    end
   end
 
   @impl true
@@ -184,9 +192,8 @@ defmodule Xander.ChainSync do
       ) do
     with {:ok, %IntersectionTarget{slot: slot, block_bytes: block_bytes}} <-
            Intersection.find_target(client, socket, sync_from),
-         {:ok, %IntersectFound{point: point}} <-
+         {:ok, %IntersectFound{}} <-
            Intersection.find_intersection(client, socket, slot, block_bytes) do
-      Logger.debug("Intersect found: (#{point.slot_number}, #{point.hash})")
       # Start the actual chainsync messages
       actions = [{:next_event, :internal, :start_chain_sync}]
       {:keep_state, data, actions}
@@ -200,7 +207,8 @@ defmodule Xander.ChainSync do
   def catching_up(
         :internal,
         :start_chain_sync,
-        %__MODULE__{client: client, socket: socket, client_module: client_module} = data
+        %__MODULE__{client: client, socket: socket, client_module: client_module} =
+          data
       ) do
     Logger.debug("starting chainsync")
 
@@ -219,9 +227,7 @@ defmodule Xander.ChainSync do
     end
 
     case emit_initial_next_message.(client, socket) do
-      {:ok, %RollBackward{point: point}} ->
-        Logger.debug("Rolling back to (#{point.slot_number}, #{point.hash})")
-
+      {:ok, %RollBackward{}} ->
         :ok = client.send(socket, Messages.next_request())
 
         # Read the next message
@@ -230,7 +236,6 @@ defmodule Xander.ChainSync do
 
       {:error, reason} ->
         Logger.warning("Error decoding payload: #{inspect(reason)}")
-
         :keep_state_and_data
     end
   end
@@ -281,7 +286,7 @@ defmodule Xander.ChainSync do
                      block_number: header.block_number,
                      size: header.block_body_size
                    },
-                   state
+                   module_state
                  ) do
               {:ok, :next_block, _new_state} ->
                 :ok = client.send(socket, Messages.next_request())
@@ -345,6 +350,7 @@ defmodule Xander.ChainSync do
 
           unknown_response ->
             Logger.debug("Unknown message: #{inspect(unknown_response)}")
+            :keep_state_and_data
         end
 
       {:error, reason} ->
@@ -370,7 +376,7 @@ defmodule Xander.ChainSync do
                 # This is the base case of the recursion and the function no
                 # longer recurses. It sets the socket to active mode so that
                 # data ingestion continues from the "new_blocks" state.
-                # The state transition from the "catching up" state to
+                # The state transition from the "catching up" state to
                 # "new_blocks" state occurs in the caller of this function.
 
                 # TODO: address race condition that takes place in case the

@@ -222,27 +222,6 @@ defmodule Xander.Integration.TransactionTest do
     socket_path: socket_path,
     supervisor_pid: _supervisor_pid
   } do
-    # Set up network parameters
-    protocol_params = Path.join(tmp_dir, "protocol-params.json")
-
-    # Get protocol parameters
-    case run_cardano_cli([
-           "query",
-           "protocol-parameters",
-           "--socket-path",
-           socket_path,
-           "--out-file",
-           protocol_params
-         ]) do
-      {_output, 0} ->
-        IO.puts("Successfully retrieved protocol parameters")
-
-      {error, 1} ->
-        IO.puts("Failed to retrieve protocol parameters: #{error}")
-        # Create a dummy protocol parameters file
-        File.write!(protocol_params, "{}")
-    end
-
     # Define the transaction chain with derived payment keys
     transaction_chain = [
       {0, @utxo0, @address0, @address1, Enum.at(payment_keys, 0)},
@@ -345,5 +324,64 @@ defmodule Xander.Integration.TransactionTest do
 
     # Wait for all responses
     _responses = Enum.map(tasks, &Task.await(&1, 30_000))
+  end
+
+  @tag :integration
+  test "can sync with the chain", %{
+    tmp_dir: tmp_dir,
+    payment_keys: payment_keys,
+    socket_path: socket_path,
+    supervisor_pid: _supervisor_pid
+  } do
+    # Test module that implements the ChainSync behaviour
+    defmodule TestChainSync do
+      use Xander.ChainSync
+
+      def handle_block(block, %Xander.ChainSync{state: state}) do
+        # Keep track of blocks we've seen
+        blocks = Keyword.get(state, :blocks, [])
+        new_state = Keyword.put(state, :blocks, [block | blocks])
+
+        # Continue syncing after 3 blocks
+        if length(blocks) >= 2 do
+          {:close, new_state}
+        else
+          {:ok, :next_block, new_state}
+        end
+      end
+    end
+
+    {:ok, pid} =
+      Xander.ChainSync.start_link(
+        TestChainSync,
+        network: :yaci_devkit,
+        path: socket_path,
+        type: :socket
+      )
+
+    # check the genserver state every 500ms until we get 3 blocks
+    Enum.reduce_while(1..60, nil, fn _i, _acc ->
+      Process.sleep(500)
+      state = :sys.get_state(pid)
+
+      case state do
+        %Xander.ChainSync{state: [blocks: blocks]} when length(blocks) >= 3 ->
+          assert length(blocks) == 3
+
+          # Blocks should be contiguous
+          blocks
+          |> Enum.with_index()
+          |> Enum.all?(fn {block, index} ->
+            is_integer(block.block_number) and
+              block.block_number == Enum.at(blocks, 0).block_number - index
+          end)
+          |> assert()
+
+          {:halt, :ok}
+
+        _ ->
+          {:cont, nil}
+      end
+    end)
   end
 end

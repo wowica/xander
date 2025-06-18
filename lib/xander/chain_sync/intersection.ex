@@ -17,6 +17,9 @@ defmodule Xander.ChainSync.Intersection do
         :conway ->
           {:ok, Ledger.conway_boundary_target()}
 
+        :origin ->
+          {:ok, Ledger.genesis_target()}
+
         {slot_number, block_hash} ->
           {:ok, Ledger.custom_point_target(slot_number, block_hash)}
 
@@ -41,8 +44,14 @@ defmodule Xander.ChainSync.Intersection do
         case Response.parse_response(intersection_response) do
           {:ok,
            %IntersectFound{
-             point: %{slot_number: ^tslot, bytes: ^tbytes}
+             point: %{slot_number: ^tslot, bytes: ^tbytes, hash: hash}
            } = intersect} ->
+            Logger.debug("Syncing from slot: #{tslot}, block hash: #{hash}")
+
+            {:ok, intersect}
+
+          {:ok, %IntersectFound{} = intersect} ->
+            Logger.debug("Syncing from origin")
             {:ok, intersect}
 
           {:error, _error} ->
