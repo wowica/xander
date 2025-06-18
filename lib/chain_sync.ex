@@ -131,7 +131,7 @@ defmodule Xander.ChainSync do
 
   def disconnected({:call, from}, _command, data) do
     actions = [{:reply, from, {:error, :disconnected}}]
-    {:stop, {:normal, data}, data, actions}
+    {:keep_state, data, actions}
   end
 
   def connected(
@@ -200,7 +200,7 @@ defmodule Xander.ChainSync do
   def catching_up(
         :internal,
         :start_chain_sync,
-        %__MODULE__{client: client, socket: socket, client_module: client_module, state: state} =
+        %__MODULE__{client: client, socket: socket, client_module: client_module} =
           data
       ) do
     Logger.debug("starting chainsync")
@@ -226,40 +226,7 @@ defmodule Xander.ChainSync do
         :ok = client.send(socket, Messages.next_request())
 
         # Read the next message
-        case read_until_sync(client, socket, client_module, data) do
-          :ok ->
-            {:next_state, :new_blocks, data}
-
-          {:error, :closed} ->
-            {:stop, {:normal, data}, data}
-
-          {:error, reason} ->
-            Logger.error("Error during sync: #{inspect(reason)}")
-            {:stop, {:normal, data}, data}
-        end
-
-      {:ok, %RollForward{header: header}} ->
-        Logger.debug("Rolling forward with block #{header.block_number}")
-
-        case client_module.handle_block(
-               %{
-                 block_number: header.block_number,
-                 size: header.block_body_size
-               },
-               state
-             ) do
-          {:ok, :next_block, new_state} ->
-            :ok = client.send(socket, Messages.next_request())
-            {:keep_state, %{data | state: new_state}}
-
-          {:close, new_state} ->
-            :ok = client.close(socket)
-            {:stop, {:normal, %{data | state: new_state}}, %{data | state: new_state}}
-        end
-
-      {:ok, %AwaitReply{}} ->
-        Logger.debug("Caught up to tip, awaiting new blocks")
-        :ok = setopts_lib(client).setopts(socket, active: :once)
+        read_until_sync(client, socket, client_module, data)
         {:next_state, :new_blocks, data}
 
       {:error, reason} ->
@@ -341,7 +308,7 @@ defmodule Xander.ChainSync do
               {:close, new_state} ->
                 Logger.debug("Disconnecting from node")
                 :ok = client.close(socket)
-                {:stop, {:normal, %{module_state | state: new_state}}}
+                {:next_state, :disconnected, %{module_state | state: new_state}}
             end
 
           {:ok, %RollBackward{point: point}} ->

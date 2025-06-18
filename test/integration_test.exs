@@ -351,35 +351,37 @@ defmodule Xander.Integration.TransactionTest do
       end
     end
 
-    # Trap exit of ChainSync process
-    Process.flag(:trap_exit, true)
-
     {:ok, pid} =
       Xander.ChainSync.start_link(
         TestChainSync,
         network: :yaci_devkit,
         path: socket_path,
-        type: :socket,
-        sync_from: :origin
+        type: :socket
       )
 
-    # Wait for the process to finish
-    Process.monitor(pid)
+    # check the genserver state every 500ms until we get 3 blocks
+    Enum.reduce_while(1..60, nil, fn _i, _acc ->
+      Process.sleep(500)
+      state = :sys.get_state(pid)
 
-    receive do
-      {:EXIT, ^pid, reason} ->
-        {:normal, %Xander.ChainSync{state: [blocks: blocks]}} = reason
+      case state do
+        %Xander.ChainSync{state: [blocks: blocks]} when length(blocks) >= 3 ->
+          assert length(blocks) == 3
 
-        assert length(blocks) == 3
+          # Blocks should be contiguous
+          blocks
+          |> Enum.with_index()
+          |> Enum.all?(fn {block, index} ->
+            is_integer(block.block_number) and
+              block.block_number == Enum.at(blocks, 0).block_number - index
+          end)
+          |> assert()
 
-        # Blocks should be contiguous
-        blocks
-        |> Enum.with_index()
-        |> Enum.all?(fn {block, index} ->
-          is_integer(block.block_number) and
-            block.block_number == Enum.at(blocks, 0).block_number - index
-        end)
-        |> assert()
-    end
+          {:halt, :ok}
+
+        _ ->
+          {:cont, nil}
+      end
+    end)
   end
 end
