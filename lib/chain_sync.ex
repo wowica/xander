@@ -90,7 +90,15 @@ defmodule Xander.ChainSync do
       state: state
     }
 
-    :gen_statem.start_link({:local, __MODULE__}, __MODULE__, data, [])
+    if sync_from && sync_from == :origin && network != :yaci_devkit do
+      Logger.error(
+        "Syncing from origin is only supported on the yaci_devkit network when create-node is used with the --era conway flag."
+      )
+
+      :ignore
+    else
+      :gen_statem.start_link({:local, __MODULE__}, __MODULE__, data, [])
+    end
   end
 
   @impl true
@@ -184,9 +192,8 @@ defmodule Xander.ChainSync do
       ) do
     with {:ok, %IntersectionTarget{slot: slot, block_bytes: block_bytes}} <-
            Intersection.find_target(client, socket, sync_from),
-         {:ok, %IntersectFound{point: point}} <-
+         {:ok, %IntersectFound{}} <-
            Intersection.find_intersection(client, socket, slot, block_bytes) do
-      Logger.debug("Intersect found: (#{point.slot_number}, #{point.hash})")
       # Start the actual chainsync messages
       actions = [{:next_event, :internal, :start_chain_sync}]
       {:keep_state, data, actions}
@@ -220,9 +227,7 @@ defmodule Xander.ChainSync do
     end
 
     case emit_initial_next_message.(client, socket) do
-      {:ok, %RollBackward{point: point}} ->
-        Logger.debug("Rolling back to (#{point.slot_number}, #{point.hash})")
-
+      {:ok, %RollBackward{}} ->
         :ok = client.send(socket, Messages.next_request())
 
         # Read the next message
