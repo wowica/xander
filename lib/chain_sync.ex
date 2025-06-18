@@ -283,7 +283,7 @@ defmodule Xander.ChainSync do
                    },
                    module_state
                  ) do
-              {:ok, :next_block, new_state} ->
+              {:ok, :next_block, _new_state} ->
                 :ok = client.send(socket, Messages.next_request())
 
                 {:ok, data} = client.recv(socket, 8, @recv_timeout)
@@ -297,18 +297,17 @@ defmodule Xander.ChainSync do
                   {:ok, %AwaitReply{}} ->
                     # Response should always be [1] msgAwaitReply
                     :ok = setopts_lib(client).setopts(socket, active: :once)
-
-                    {:keep_state, %{module_state | state: new_state}}
+                    :keep_state_and_data
 
                   error ->
                     Logger.warning("Error decoding next request: #{inspect(error)}")
-                    {:keep_state, %{module_state | state: new_state}}
+                    :keep_state_and_data
                 end
 
-              {:close, new_state} ->
+              {:close, _new_state} ->
                 Logger.debug("Disconnecting from node")
                 :ok = client.close(socket)
-                {:next_state, :disconnected, %{module_state | state: new_state}}
+                {:next_state, :disconnected, module_state}
             end
 
           {:ok, %RollBackward{point: point}} ->
