@@ -15,7 +15,7 @@ Elixir client for Cardano's Ouroboros networking protocol. This library can be u
   - get_current_era
   - get_current_block_height
   - get_current_tip
-- [ ] Chain-Sync
+- [x] Chain-Sync (support for Conway era only)
 
 ## Quickstart
 
@@ -200,4 +200,51 @@ For a more detailed description of different ways to use this library, read the 
   ```
 
   A successful submission should return the transaction ID. This ID can be used to check the status of the transaction on any Cardano blockchain explorer.
+</details>
+
+<details>
+  <summary><i>Running ChainSync</i></summary>
+
+  ## Chain Sync
+
+  In order to sync blocks from a Cardano node, you can either run the `run_chain_sync.exs` script directly or use Docker.
+
+  ## Running the script
+
+  This assumes you have Elixir installed. In order to run the script directly, follow the steps below:
+
+  1. Populate the environment variable `CARDANO_NODE_SOCKET_PATH` with a socket file for a fully synced **mainnet** Cardano node.
+  2. Run `elixir run_chain_sync.exs`
+
+  Using default settings, this will start syncing from the start of the Conway era. For each block, the block number (height) and block size (in bytes) will be displayed.
+
+  If you wish to connect with one of the testnets, see comments on the `FollowDaChain.start_link/1` function for more information on exact points in the chain to start syncing from.
+
+  ## Using Docker
+
+  This assumes you have Docker installed. No Elixir installation is required.
+
+  1. First, build the image:
+
+  ```
+  docker build -t xander .
+  ```
+
+  ```
+  docker run --rm -v /your/local/cardano-node.socket:/tmp/cardano-node.socket xander elixir run_chain_sync.exs
+  ```
+
+  ## Using Demeter.run
+  
+  Populate the environment variable `DEMETER_URL` with the URL of a node at Demeter.run and run the `run_chain_sync_with_demeter.exs` script.
+
+  ```
+  DEMETER_URL=https://your-node-at.demeter.run elixir run_chain_sync_with_demeter.exs
+  ```
+
+  or use Docker:
+
+  ```
+  docker run --rm -e DEMETER_URL=https://your-node-at.demeter.run xander elixir run_chain_sync_with_demeter.exs
+  ```
 </details>

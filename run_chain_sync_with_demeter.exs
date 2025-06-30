@@ -49,8 +49,14 @@ defmodule CardanoApplication do
   end
 
   defp opts do
-    socket_path = System.get_env("CARDANO_NODE_SOCKET_PATH", "/tmp/cardano-node.socket")
-    Xander.Config.default_config!(socket_path)
+    demeter_url = System.get_env("DEMETER_URL")
+
+    if demeter_url == nil do
+      IO.puts("Error: DEMETER_URL environment variable is not set")
+      System.halt(1)
+    end
+
+    Xander.Config.demeter_config!(demeter_url)
   end
 end
 
