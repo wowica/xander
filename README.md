@@ -83,7 +83,7 @@ For a more detailed description of different ways to use this library, read the 
   ```bash
   docker run --rm \
     -e DEMETER_URL=https://your-node-at.demeter.run \
-    xander elixir run_with_demeter.exs
+    xander elixir run_queries_with_demeter.exs
   ```
 </details>
 
@@ -147,7 +147,7 @@ For a more detailed description of different ways to use this library, read the 
   To connect to a node at Demeter.run, set `DEMETER_URL` to your Node Demeter URL.
 
   ```bash
-  DEMETER_URL=https://your-node-at.demeter.run elixir run_with_demeter.exs
+  DEMETER_URL=https://your-node-at.demeter.run elixir run_queries_with_demeter.exs
   ```
 </details>
 
