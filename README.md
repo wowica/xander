@@ -3,6 +3,10 @@
 ![CI Status](https://github.com/wowica/xander/actions/workflows/ci.yml/badge.svg)
 [![Version](https://img.shields.io/hexpm/v/xander.svg)](https://hex.pm/packages/xander)
 
+<p align="center">
+  <img src="assets/xander-logo.png" alt="Xander" width="300">
+</p>
+
 Elixir client for Cardano's Ouroboros networking protocol. This library can be used to build Elixir applications that connect to a Cardano node using the Node-to-Client protocol.
 
 ⚠️ This project is under active development. See [Xogmios](https://github.com/wowica/xogmios) for a more stable solution to connect to a Cardano node through [Ogmios](https://ogmios.dev/).
