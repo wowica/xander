@@ -13,7 +13,7 @@ defmodule Xander.Util do
   def plex(msg) when is_binary(msg) and byte_size(msg) >= 8 do
     <<
       _timestamp::big-32,
-      mode::1,
+      mode::big-1,
       protocol_id::15,
       payload_size::big-16,
       payload::binary
