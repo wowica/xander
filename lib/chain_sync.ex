@@ -216,6 +216,7 @@ defmodule Xander.ChainSync do
     emit_initial_next_message = fn client, socket ->
       with :ok <- client.send(socket, Messages.next_request()),
            {:ok, header_bytes} <- client.recv(socket, 8, @recv_timeout),
+           # TODO: use Util.plex!
            <<_timestamp::big-32, _mode::1, _protocol_id::15, payload_length::big-16>> <-
              header_bytes,
            {:ok, payload} <- client.recv(socket, payload_length, @recv_timeout) do
@@ -364,6 +365,7 @@ defmodule Xander.ChainSync do
     # Read the header (8 bytes)
     case client.recv(socket, 8, @recv_timeout) do
       {:ok, header_bytes} ->
+        # TODO: use Util.plex!
         <<_timestamp::big-32, _mode::1, _protocol_id::15, payload_length::big-16>> = header_bytes
 
         case client.recv(socket, payload_length, @recv_timeout) do
@@ -424,6 +426,7 @@ defmodule Xander.ChainSync do
     # Read another header
     case client.recv(socket, 8, @recv_timeout) do
       {:ok, header_bytes} ->
+        # TODO: use Util.plex!
         <<_timestamp::big-32, _mode::1, _protocol_id::15, payload_length::big-16>> = header_bytes
 
         # Read another payload
