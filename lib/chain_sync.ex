@@ -185,6 +185,19 @@ defmodule Xander.ChainSync do
   # In this state, it finds the intersection point and then starts reading the blocks
   # until it reaches the tip of the chain - this happens when the client receives
   # a msgAwaitReply response.
+  @spec catching_up(:internal, :find_intersection | :start_chain_sync, %Xander.ChainSync{
+          :client => atom(),
+          :socket => any()
+        }) ::
+          :keep_state_and_data
+          | {:keep_state,
+             %Xander.ChainSync{
+               :client => atom(),
+               :socket => any(),
+               :sync_from => any()
+             }, [{any(), any(), any()}, ...]}
+          | {:next_state, :disconnected | :new_blocks,
+             %Xander.ChainSync{:client => atom(), :socket => any()}}
   def catching_up(
         :internal,
         :find_intersection,
@@ -286,7 +299,7 @@ defmodule Xander.ChainSync do
                      block_number: header.block_number,
                      size: header.block_body_size
                    },
-                   module_state
+                   state
                  ) do
               {:ok, :next_block, _new_state} ->
                 :ok = client.send(socket, Messages.next_request())

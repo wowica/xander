@@ -337,7 +337,7 @@ defmodule Xander.Integration.TransactionTest do
     defmodule TestChainSync do
       use Xander.ChainSync
 
-      def handle_block(block, %Xander.ChainSync{state: state}) do
+      def handle_block(block, state) do
         # Keep track of blocks we've seen
         blocks = Keyword.get(state, :blocks, [])
         new_state = Keyword.put(state, :blocks, [block | blocks])
