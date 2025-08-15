@@ -14,7 +14,7 @@ defmodule Xander.Util do
     <<
       _timestamp::big-32,
       mode::big-1,
-      protocol_id::15,
+      protocol_id::big-15,
       payload_size::big-16,
       payload::binary
     >> = msg
