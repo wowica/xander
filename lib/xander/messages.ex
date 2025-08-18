@@ -190,7 +190,12 @@ defmodule Xander.Messages do
 
   # middle 16 bits are: 1 bit == 0 for initiator and 15 bits for the mini protocol ID
   defp header(mini_protocol_id, payload),
-    do: <<header_timestamp()::big-32, 0::1, mini_protocol_id::15, byte_size(payload)::big-16>>
+    do: <<
+      header_timestamp()::big-32,
+      0::1,
+      mini_protocol_id::15,
+      byte_size(payload)::big-16
+    >>
 
   # Returns the lower 32 bits of the system's monotonic time in microseconds
   defp header_timestamp,
