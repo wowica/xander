@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 accounts for the Mode bit in the multiplexer which fixes the reading of
 protocol ID.
 
+- Fix multiplexer header for outgoing messages. Properly setting the Mode as 1
+bit and the mini protocol ID as 15 bits.
+
 ## [v0.3.0](https://github.com/wowica/xander/releases/tag/v0.3.0) (2025-08-14)
 
 ### Added
