@@ -164,9 +164,6 @@ defmodule Xander.Query do
     # Handle acquire response (MsgAcquired) to transition to Acquired state
     case client.recv(socket, 0, _timeout = 5_000) do
       {:ok, _acquire_response} ->
-        # Set socket to active mode to receive async messages from node
-        :ok = setopts_lib(client).setopts(socket, active: :once)
-
         # Track the caller and query_name, then transition to
         # established_has_agency state prior to sending the query.
         data = update_in(data.queue, &:queue.in({from, query_name}, &1))
