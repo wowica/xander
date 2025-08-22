@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+
+- `Xander.Query` support for retrying connection to node when it is not available.
+
 ### Fixed
 
 - Fix reading multiplexer messages on `Xander.Util.plex/1`. This fix properly
