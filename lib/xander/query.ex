@@ -106,9 +106,14 @@ defmodule Xander.Query do
         {:next_state, :connected, data, actions}
 
       {:error, reason} ->
-        Logger.error("Error reaching socket #{inspect(reason)}")
-        {:next_state, :disconnected, data}
+        Logger.error("Error connecting to node #{inspect(reason)}")
+        actions = [{:state_timeout, 5_000, :retry_connect}]
+        {:keep_state, data, actions}
     end
+  end
+
+  def disconnected(:state_timeout, :retry_connect, data) do
+    {:keep_state, data, [{:next_event, :internal, :connect}]}
   end
 
   def disconnected({:call, from}, _command, data) do
