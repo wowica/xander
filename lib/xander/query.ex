@@ -113,7 +113,8 @@ defmodule Xander.Query do
   end
 
   def disconnected(:state_timeout, :retry_connect, data) do
-    {:keep_state, data, [{:next_event, :internal, :connect}]}
+    actions = [{:next_event, :internal, :connect}]
+    {:keep_state, data, actions}
   end
 
   def disconnected({:call, from}, _command, data) do
