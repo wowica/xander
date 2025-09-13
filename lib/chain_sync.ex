@@ -255,7 +255,7 @@ defmodule Xander.ChainSync do
   end
 
   # The new_blocks state is when the client has caught up to the tip of the chain
-  # and passively receives new blocks from the node after msgAwaitReply responses.
+  # and receives new blocks from the node after msgAwaitReply responses.
   def new_blocks(
         :info,
         {_tcp_or_ssl, socket, data},
@@ -263,6 +263,7 @@ defmodule Xander.ChainSync do
           module_state
       ) do
     Logger.debug("handling new block")
+    :ok = setopts_lib(client).setopts(socket, active: :once)
 
     %{payload: payload, size: payload_length} = Util.plex!(data)
     remaining_payload_length = payload_length - byte_size(payload)
@@ -289,7 +290,6 @@ defmodule Xander.ChainSync do
 
         case CSResponse.decode(combined_payload) do
           {:ok, %AwaitReply{}} ->
-            :ok = setopts_lib(client).setopts(socket, active: :once)
             :keep_state_and_data
 
           {:ok, %RollForward{header: header}} ->
@@ -315,7 +315,6 @@ defmodule Xander.ChainSync do
                 case CSResponse.decode(combined_payload) do
                   {:ok, %AwaitReply{}} ->
                     # Response should always be [1] msgAwaitReply
-                    :ok = setopts_lib(client).setopts(socket, active: :once)
                     {:keep_state, %{module_state | state: new_state}}
 
                   error ->
@@ -343,7 +342,6 @@ defmodule Xander.ChainSync do
                  ) do
               {:ok, :next_block, new_state} ->
                 :ok = client.send(socket, Messages.next_request())
-                :ok = setopts_lib(client).setopts(socket, active: :once)
                 {:keep_state, %{module_state | state: new_state}}
 
               {:ok, :stop} ->
@@ -389,15 +387,11 @@ defmodule Xander.ChainSync do
               {:ok, %AwaitReply{}} ->
                 Logger.debug("Awaiting reply")
                 # This is the base case of the recursion and the function no
-                # longer recurses. It sets the socket to active mode so that
-                # data ingestion continues from the "new_blocks" state.
-                # The state transition from the "catching up" state to
-                # "new_blocks" state occurs in the caller of this function.
-
-                # TODO: address race condition that takes place in case the
-                # node replies after socket is set to active but before the
-                # client has transitioned to the new state.
-                :ok = setopts_lib(client).setopts(socket, active: :once)
+                # longer recurses. The socket will be set to active mode
+                # after the state transition occurs in the caller of this function.
+                # This avoids the race condition where the node could reply
+                # after socket is set to active but before state transition.
+                :ok
 
               {:ok, %RollForward{header: header}} ->
                 # This is the callback from the client module
