@@ -148,7 +148,8 @@ defmodule Xander.Query do
 
       {:error, reason} ->
         Logger.error("Error establishing connection #{inspect(reason)}")
-        {:next_state, :disconnected, data}
+        actions = [{:state_timeout, 5_000, :retry_connect}]
+        {:next_state, :disconnected, data, actions}
     end
   end
 
@@ -164,19 +165,25 @@ defmodule Xander.Query do
         {:request, query_name},
         %__MODULE__{client: client, socket: socket} = data
       ) do
-    # Send acquire message to transition to Acquiring state
-    :ok = client.send(socket, Messages.msg_acquire())
+    # Send acquire message and handle response
+    with :ok <- client.send(socket, Messages.msg_acquire()),
+         {:ok, _acquire_response} <- client.recv(socket, 0, _timeout = 5_000),
+         :ok <- setopts_lib(client).setopts(socket, active: :once) do
+      # Track the caller and query_name, then transition to
+      # established_has_agency state prior to sending the query.
+      data = update_in(data.queue, &:queue.in({from, query_name}, &1))
+      {:next_state, :established_has_agency, data, [{:next_event, :internal, :send_query}]}
+    else
+      {:error, :closed} ->
+        Logger.error("Connection closed during acquire")
 
-    # Handle acquire response (MsgAcquired) to transition to Acquired state
-    case client.recv(socket, 0, _timeout = 5_000) do
-      {:ok, _acquire_response} ->
-        # Set socket to active mode to receive async messages from node
-        :ok = setopts_lib(client).setopts(socket, active: :once)
+        actions = [
+          {:reply, from, {:error, :disconnected}},
+          {:state_timeout, 5_000, :retry_connect}
+        ]
 
-        # Track the caller and query_name, then transition to
-        # established_has_agency state prior to sending the query.
-        data = update_in(data.queue, &:queue.in({from, query_name}, &1))
-        {:next_state, :established_has_agency, data, [{:next_event, :internal, :send_query}]}
+        data = %{data | socket: nil}
+        {:next_state, :disconnected, data, actions}
 
       {:error, reason} ->
         Logger.error("Failed to acquire state: #{inspect(reason)}")
@@ -187,7 +194,9 @@ defmodule Xander.Query do
 
   def established_no_agency(:info, {:tcp_closed, socket}, %__MODULE__{socket: socket} = data) do
     Logger.error("Connection closed while in established_no_agency")
-    {:next_state, :disconnected, data}
+    data = %{data | socket: nil}
+    actions = [{:state_timeout, 5_000, :retry_connect}]
+    {:next_state, :disconnected, data, actions}
   end
 
   @doc """
@@ -247,7 +256,9 @@ defmodule Xander.Query do
 
   def established_has_agency(:info, {:tcp_closed, socket}, %__MODULE__{socket: socket} = data) do
     Logger.error("Connection closed while querying")
-    {:next_state, :disconnected, data}
+    data = %{data | socket: nil}
+    actions = [{:state_timeout, 5_000, :retry_connect}]
+    {:next_state, :disconnected, data, actions}
   end
 
   def established_has_agency(:timeout, _event_content, data) do

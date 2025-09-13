@@ -384,4 +384,71 @@ defmodule Xander.Integration.TransactionTest do
       end
     end)
   end
+
+  @tag :integration
+  test "Xander.Query reconnects after connection loss", %{
+    socket_path: socket_path,
+    supervisor_pid: _supervisor_pid
+  } do
+    # Use the existing Query process from the setup
+    query_pid = Xander.Query
+
+    # First, verify the connection works by making a successful query
+    assert {:ok, _result} = Xander.Query.run(query_pid, :get_current_era)
+    IO.puts("Initial query successful - connection established")
+
+    # Get the current state to verify we're connected
+    {_state, %{socket: initial_socket, client: client} = initially_connected_module_state} =
+      :sys.get_state(query_pid)
+
+    assert initial_socket != nil
+    IO.puts("Verified initial connection state")
+
+    # Simulate connection loss by closing the socket
+    # This mimics what happens when the node goes down or network issues occur
+    case client do
+      :gen_tcp ->
+        :gen_tcp.close(initial_socket)
+
+      :ssl ->
+        :ssl.close(initial_socket)
+    end
+
+    IO.puts("Simulated connection loss by closing socket")
+
+    # The next query should fail initially since we're disconnected
+    assert {:error, :disconnected} = Xander.Query.run(query_pid, :get_current_era)
+    IO.puts("Confirmed query fails when disconnected")
+
+    # Verify the process is now in disconnected state
+    {:disconnected, disconnected_state} = :sys.get_state(query_pid)
+    assert disconnected_state.socket == nil
+    IO.puts("Verified process is in disconnected state")
+
+    # Wait for the automatic reconnection (should retry after 5 seconds based on the code)
+    IO.puts("Waiting for automatic reconnection...")
+
+    # Poll the state until we're reconnected (with timeout)
+    reconnected =
+      Enum.reduce_while(1..20, false, fn i, _acc ->
+        Process.sleep(500)
+
+        {state, %{socket: reconnected_socket} = _reconnected_module_state} =
+          :sys.get_state(query_pid)
+
+        IO.puts("Reconnection attempt #{i}: socket = #{inspect(reconnected_socket)}")
+
+        case reconnected_socket do
+          nil -> {:cont, false}
+          _socket -> {:halt, true}
+        end
+      end)
+
+    assert reconnected, "Query process should have reconnected within 10 seconds"
+    IO.puts("Successfully detected reconnection")
+
+    # Verify that queries work again after reconnection
+    assert {:ok, _result} = Xander.Query.run(query_pid, :get_current_era)
+    IO.puts("Query successful after reconnection - test passed!")
+  end
 end
