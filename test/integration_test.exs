@@ -387,7 +387,6 @@ defmodule Xander.Integration.TransactionTest do
 
   @tag :integration
   test "Xander.Query reconnects after connection loss", %{
-    socket_path: socket_path,
     supervisor_pid: _supervisor_pid
   } do
     # Use the existing Query process from the setup
@@ -398,7 +397,7 @@ defmodule Xander.Integration.TransactionTest do
     IO.puts("Initial query successful - connection established")
 
     # Get the current state to verify we're connected
-    {_state, %{socket: initial_socket, client: client} = initially_connected_module_state} =
+    {_state, %{socket: initial_socket, client: client}} =
       :sys.get_state(query_pid)
 
     assert initial_socket != nil
@@ -433,7 +432,7 @@ defmodule Xander.Integration.TransactionTest do
       Enum.reduce_while(1..20, false, fn i, _acc ->
         Process.sleep(500)
 
-        {state, %{socket: reconnected_socket} = _reconnected_module_state} =
+        {_state, %{socket: reconnected_socket} = _reconnected_module_state} =
           :sys.get_state(query_pid)
 
         IO.puts("Reconnection attempt #{i}: socket = #{inspect(reconnected_socket)}")
