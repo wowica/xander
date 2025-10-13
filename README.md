@@ -252,3 +252,11 @@ For a more detailed description of different ways to use this library, read the 
   docker run --rm -e DEMETER_URL=https://your-node-at.demeter.run xander elixir run_chain_sync_with_demeter.exs
   ```
 </details>
+
+## Testing
+
+The integration tests are built upon [Yaci Devkit](https://github.com/bloxbean/yaci-devkit) and can be run locally with [nektos/act](https://github.com/nektos/act) like so:
+
+```
+act -j integration_test
+```
