@@ -397,7 +397,7 @@ defmodule Xander.Integration.TransactionTest do
     IO.puts("Initial query successful - connection established")
 
     # Get the current state to verify we're connected
-    {_state, %{socket: initial_socket, client: client}} =
+    {_state, %{socket: initial_socket, transport: transport}} =
       :sys.get_state(query_pid)
 
     assert initial_socket != nil
@@ -405,13 +405,7 @@ defmodule Xander.Integration.TransactionTest do
 
     # Simulate connection loss by closing the socket
     # This mimics what happens when the node goes down or network issues occur
-    case client do
-      :gen_tcp ->
-        :gen_tcp.close(initial_socket)
-
-      :ssl ->
-        :ssl.close(initial_socket)
-    end
+    Xander.Transport.close(transport, initial_socket)
 
     IO.puts("Simulated connection loss by closing socket")
 
