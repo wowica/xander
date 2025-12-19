@@ -152,6 +152,9 @@ defmodule Xander.Transaction do
       # Simply ignoring the handshake response for now.
       # We might want to look into it later.
       Logger.info("Handshake successful")
+
+      # When handshake is successful, we transition to the idle state and
+      # wait for clients to send transactions.
       {:next_state, :idle, data}
     else
       {:refused, response} ->
