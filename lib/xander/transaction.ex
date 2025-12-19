@@ -9,21 +9,19 @@ defmodule Xander.Transaction do
   alias Xander.Messages
   alias Xander.Transaction.Hash
   alias Xander.Transaction.Response
+  alias Xander.Transport
 
   require Logger
 
-  @basic_tcp_opts [:binary, active: false, send_timeout: 4_000]
   @active_n2c_versions [9, 10, 11, 12, 13, 14, 15, 16, 17]
 
-  defstruct [:client, :path, :port, :socket, :network, queue: :queue.new()]
+  defstruct [:transport, :socket, :network, queue: :queue.new()]
 
   @typedoc """
   Type defining the Transaction struct.
   """
   @type t :: %__MODULE__{
-          client: atom(),
-          path: any(),
-          port: non_neg_integer() | 0,
+          transport: Transport.t(),
           socket: any(),
           network: any(),
           queue: :queue.queue()
@@ -54,10 +52,10 @@ defmodule Xander.Transaction do
   """
   @spec start_link(Keyword.t()) :: GenServer.on_start()
   def start_link(network: network, path: path, port: port, type: type) do
+    transport = Transport.new(path: path, port: port, type: type)
+
     data = %__MODULE__{
-      client: tcp_lib(type),
-      path: maybe_local_path(path, type),
-      port: maybe_local_port(port, type),
+      transport: transport,
       network: network,
       socket: nil
     }
@@ -111,15 +109,11 @@ defmodule Xander.Transaction do
   def disconnected(
         :internal,
         :connect,
-        %__MODULE__{client: client, path: path, port: port} = data
+        %__MODULE__{transport: transport} = data
       ) do
-    Logger.info("Connecting to #{inspect(path)}:#{inspect(port)}")
+    Logger.info("Connecting to node...")
 
-    case client.connect(
-           maybe_parse_path(path),
-           port,
-           tcp_opts(client, path)
-         ) do
+    case Transport.connect(transport) do
       {:ok, socket} ->
         data = %__MODULE__{data | socket: socket}
         actions = [{:next_event, :internal, :establish}]
@@ -146,29 +140,24 @@ defmodule Xander.Transaction do
   def connected(
         :internal,
         :establish,
-        %__MODULE__{client: client, socket: socket, network: network} = data
+        %__MODULE__{transport: transport, socket: socket, network: network} = data
       ) do
     Logger.info("Establishing handshake...")
 
-    :ok =
-      client.send(
-        socket,
-        Handshake.Proposal.version_message(@active_n2c_versions, network)
-      )
+    version_message = Handshake.Proposal.version_message(@active_n2c_versions, network)
 
-    case client.recv(socket, 0, _timeout = 5_000) do
-      {:ok, full_response} ->
-        case Handshake.Response.validate(full_response) do
-          {:ok, _handshake_response} ->
-            # Transitions to idle state
-            Logger.info("Handshake successful")
-            {:next_state, :idle, data}
+    with :ok <- Transport.send(transport, socket, version_message),
+         {:ok, version_response} <- Transport.recv(transport, socket, 0, _timeout = 5_000),
+         {:ok, _handshake_response} <- Handshake.Response.validate(version_response) do
+      # Simply ignoring the handshake response for now.
+      # We might want to look into it later.
+      Logger.info("Handshake successful")
+      {:next_state, :idle, data}
+    else
+      {:refused, response} ->
+        Logger.error("Handshake refused by node. Response: #{inspect(response)}")
 
-          {:refused, response} ->
-            Logger.error("Handshake refused by node. Response: #{inspect(response)}")
-
-            {:next_state, :disconnected, data}
-        end
+        {:next_state, :disconnected, data}
 
       {:error, reason} ->
         Logger.error("Error establishing connection #{inspect(reason)}")
@@ -202,13 +191,13 @@ defmodule Xander.Transaction do
   def busy(
         :internal,
         :send_tx,
-        %__MODULE__{client: client, socket: socket, queue: queue} = data
+        %__MODULE__{transport: transport, socket: socket, queue: queue} = data
       ) do
     case :queue.peek(queue) do
       {:value, {_from, tx_hash}} ->
-        :inet.setopts(socket, active: :once)
+        :ok = Transport.setopts(transport, socket, active: :once)
 
-        :ok = client.send(socket, Messages.transaction(tx_hash))
+        :ok = Transport.send(transport, socket, Messages.transaction(tx_hash))
         {:keep_state, data}
 
       :empty ->
@@ -265,7 +254,7 @@ defmodule Xander.Transaction do
   def idle(
         {:call, from},
         {:request, :send_tx, tx_hash},
-        %__MODULE__{client: _client, socket: _socket} = data
+        %__MODULE__{} = data
       ) do
     # Track the caller and transaction in our queue. A queue is kept to handle
     # transactions that are sent from the dependent process while the current
@@ -307,31 +296,4 @@ defmodule Xander.Transaction do
         {:next_state, :busy, new_data, actions ++ [{:next_event, :internal, :send_tx}]}
     end
   end
-
-  defp maybe_local_path(path, :socket), do: {:local, path}
-  defp maybe_local_path(path, _), do: path
-
-  defp maybe_local_port(_port, :socket), do: 0
-  defp maybe_local_port(port, _), do: port
-
-  defp maybe_parse_path(path) when is_binary(path) do
-    uri = URI.parse(path)
-    ~c"#{uri.host}"
-  end
-
-  defp maybe_parse_path(path), do: path
-
-  defp tcp_lib(:ssl), do: :ssl
-  defp tcp_lib(_), do: :gen_tcp
-
-  defp tcp_opts(:ssl, path),
-    do:
-      @basic_tcp_opts ++
-        [
-          verify: :verify_none,
-          server_name_indication: ~c"#{path}",
-          secure_renegotiate: true
-        ]
-
-  defp tcp_opts(_, _), do: @basic_tcp_opts
 end
