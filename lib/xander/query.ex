@@ -9,13 +9,13 @@ defmodule Xander.Query do
   alias Xander.Handshake
   alias Xander.Messages
   alias Xander.Query.Response
+  alias Xander.Transport
 
   require Logger
 
-  @basic_tcp_opts [:binary, active: false, send_timeout: 4_000]
   @active_n2c_versions [9, 10, 11, 12, 13, 14, 15, 16, 17]
 
-  defstruct [:client, :path, :port, :socket, :network, queue: :queue.new()]
+  defstruct [:transport, :socket, :network, queue: :queue.new()]
 
   ##############
   # Public API #
@@ -47,10 +47,10 @@ defmodule Xander.Query do
   """
   @spec start_link(Keyword.t()) :: GenServer.on_start()
   def start_link(network: network, path: path, port: port, type: type) do
+    transport = Transport.new(path: path, port: port, type: type)
+
     data = %__MODULE__{
-      client: tcp_lib(type),
-      path: maybe_local_path(path, type),
-      port: maybe_local_port(port, type),
+      transport: transport,
       network: network,
       socket: nil
     }
@@ -93,13 +93,9 @@ defmodule Xander.Query do
   def disconnected(
         :internal,
         :connect,
-        %__MODULE__{client: client, path: path, port: port} = data
+        %__MODULE__{transport: transport} = data
       ) do
-    case client.connect(
-           maybe_parse_path(path),
-           port,
-           tcp_opts(client, path)
-         ) do
+    case Transport.connect(transport) do
       {:ok, socket} ->
         data = %__MODULE__{data | socket: socket}
         actions = [{:next_event, :internal, :establish}]
@@ -131,15 +127,16 @@ defmodule Xander.Query do
   def connected(
         :internal,
         :establish,
-        %__MODULE__{client: client, socket: socket, network: network} = data
+        %__MODULE__{transport: transport, socket: socket, network: network} = data
       ) do
     :ok =
-      client.send(
+      Transport.send(
+        transport,
         socket,
         Handshake.Proposal.version_message(@active_n2c_versions, network)
       )
 
-    case client.recv(socket, 0, _timeout = 5_000) do
+    case Transport.recv(transport, socket, 0, _timeout = 5_000) do
       {:ok, full_response} ->
         {:ok, _handshake_response} = Handshake.Response.validate(full_response)
 
@@ -163,12 +160,12 @@ defmodule Xander.Query do
   def established_no_agency(
         {:call, from},
         {:request, query_name},
-        %__MODULE__{client: client, socket: socket} = data
+        %__MODULE__{transport: transport, socket: socket} = data
       ) do
     # Send acquire message and handle response
-    with :ok <- client.send(socket, Messages.msg_acquire()),
-         {:ok, _acquire_response} <- client.recv(socket, 0, _timeout = 5_000),
-         :ok <- setopts_lib(client).setopts(socket, active: :once) do
+    with :ok <- Transport.send(transport, socket, Messages.msg_acquire()),
+         {:ok, _acquire_response} <- Transport.recv(transport, socket, 0, _timeout = 5_000),
+         :ok <- Transport.setopts(transport, socket, active: :once) do
       # Track the caller and query_name, then transition to
       # established_has_agency state prior to sending the query.
       data = update_in(data.queue, &:queue.in({from, query_name}, &1))
@@ -219,16 +216,16 @@ defmodule Xander.Query do
   def established_has_agency(
         :internal,
         :send_query,
-        %__MODULE__{client: client, socket: socket} = data
+        %__MODULE__{transport: transport, socket: socket} = data
       ) do
     # Get the current query_name from queue without removing it
     {:value, {_from, query_name}} = :queue.peek(data.queue)
 
     # Set socket to active mode so we can receive the next response
-    :ok = setopts_lib(client).setopts(socket, active: :once)
+    :ok = Transport.setopts(transport, socket, active: :once)
 
     # Send query to node and remain in established_has_agency state
-    :ok = client.send(socket, build_query_message(query_name))
+    :ok = Transport.send(transport, socket, build_query_message(query_name))
     {:keep_state, data}
   end
 
@@ -241,16 +238,16 @@ defmodule Xander.Query do
   def established_has_agency(
         :info,
         {_tcp_or_ssl, socket, bytes},
-        %__MODULE__{client: client, socket: socket} = data
+        %__MODULE__{transport: transport, socket: socket} = data
       ) do
     # Parse query response (MsgResult)
     case Response.parse_response(bytes) do
       {:ok, query_response} ->
-        handle_query_result({:ok, query_response}, data, client, socket)
+        handle_query_result({:ok, query_response}, data, transport, socket)
 
       {:error, reason} ->
         Logger.error("Failed to parse response: #{inspect(reason)}")
-        handle_query_result({:error, :parse_failed}, data, client, socket)
+        handle_query_result({:error, :parse_failed}, data, transport, socket)
     end
   end
 
@@ -275,13 +272,13 @@ defmodule Xander.Query do
     end
   end
 
-  defp handle_query_result(result, data, client, socket) do
+  defp handle_query_result(result, data, transport, socket) do
     case :queue.out(data.queue) do
       {{:value, {caller, _query_name}}, rest_queue} ->
         actions = [{:reply, caller, result}]
 
         if :queue.is_empty(rest_queue) do
-          :ok = client.send(socket, Messages.msg_release())
+          :ok = Transport.send(transport, socket, Messages.msg_release())
           new_data = %{data | queue: rest_queue}
           {:next_state, :established_no_agency, new_data, actions}
         else
@@ -290,38 +287,8 @@ defmodule Xander.Query do
         end
 
       {:empty, _} ->
-        :ok = client.send(socket, Messages.msg_release())
+        :ok = Transport.send(transport, socket, Messages.msg_release())
         {:next_state, :established_no_agency, data, []}
     end
   end
-
-  defp maybe_local_path(path, :socket), do: {:local, path}
-  defp maybe_local_path(path, _), do: path
-
-  defp maybe_local_port(_port, :socket), do: 0
-  defp maybe_local_port(port, _), do: port
-
-  defp maybe_parse_path(path) when is_binary(path) do
-    uri = URI.parse(path)
-    ~c"#{uri.host}"
-  end
-
-  defp maybe_parse_path(path), do: path
-
-  defp tcp_lib(:ssl), do: :ssl
-  defp tcp_lib(_), do: :gen_tcp
-
-  defp tcp_opts(:ssl, path),
-    do:
-      @basic_tcp_opts ++
-        [
-          verify: :verify_none,
-          server_name_indication: ~c"#{path}",
-          secure_renegotiate: true
-        ]
-
-  defp tcp_opts(_, _), do: @basic_tcp_opts
-
-  defp setopts_lib(:ssl), do: :ssl
-  defp setopts_lib(_), do: :inet
 end
