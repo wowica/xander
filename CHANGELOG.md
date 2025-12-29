@@ -20,6 +20,8 @@ connections (via `:gen_tcp`) and SSL connections (via `:ssl`).
 eliminating the need for mini-protocol implementations to handle
 transport-specific logic.
 
+- Refactored `Xander.Transaction` to use the new `Xander.Transport` module.
+
 ### Fixed
 
 - Fix reading multiplexer messages on `Xander.Util.plex/1`. This fix properly
