@@ -22,6 +22,8 @@ transport-specific logic.
 
 - Refactored `Xander.Transaction` to use the new `Xander.Transport` module.
 
+- Refactored `Xander.ChainSync` to use the new `Xander.Transport` module.
+
 ### Fixed
 
 - Fix reading multiplexer messages on `Xander.Util.plex/1`. This fix properly
