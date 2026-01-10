@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+
+- `Xander.Query` support for retrying connection to node when it is not available.
+- `Xander.Transport` module to abstract transport layer details for connecting
+to Cardano nodes, providing a unified interface for both Unix socket
+connections (via `:gen_tcp`) and SSL connections (via `:ssl`).
+
+### Changed
+
+- Refactored `Xander.Query` to use the new `Xander.Transport` module,
+eliminating the need for mini-protocol implementations to handle
+transport-specific logic.
+
+- Refactored `Xander.Transaction` to use the new `Xander.Transport` module.
+
+- Refactored `Xander.ChainSync` to use the new `Xander.Transport` module.
+
 ### Fixed
 
 - Fix reading multiplexer messages on `Xander.Util.plex/1`. This fix properly
