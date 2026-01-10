@@ -253,7 +253,8 @@ defmodule Xander.ChainSync do
         :info,
         {_tcp_or_ssl, socket, data},
         %__MODULE__{
-          client: client,
+          transport: transport,
+          # client: client,
           socket: socket,
           client_module: client_module,
           state: client_state
@@ -274,7 +275,7 @@ defmodule Xander.ChainSync do
         {:ok, current_payload}
 
       current_payload, recv_payload_length ->
-        case client.recv(socket, recv_payload_length, @recv_timeout) do
+        case Transport.recv(transport, socket, recv_payload_length, @recv_timeout) do
           {:ok, additional_payload} ->
             {:ok, current_payload <> additional_payload}
 
@@ -290,7 +291,7 @@ defmodule Xander.ChainSync do
         case CSResponse.decode(combined_payload) do
           {:ok, %AwaitReply{}} ->
             # We're at the tip, transition to new_blocks and re-enable active mode
-            :ok = setopts_lib(client).setopts(socket, active: :once)
+            :ok = Transport.setopts(transport, socket, active: :once)
             {:next_state, :new_blocks, module_state}
 
           {:ok, %RollForward{header: header}} ->
@@ -304,13 +305,13 @@ defmodule Xander.ChainSync do
                    client_state
                  ) do
               {:ok, :next_block, _new_state} ->
-                :ok = client.send(socket, Messages.next_request())
-                :ok = setopts_lib(client).setopts(socket, active: :once)
+                :ok = Transport.send(transport, socket, Messages.next_request())
+                :ok = Transport.setopts(transport, socket, active: :once)
                 :keep_state_and_data
 
               {:close, _new_state} ->
                 Logger.debug("Disconnecting from node")
-                :ok = client.close(socket)
+                :ok = Transport.close(transport, socket)
                 {:next_state, :disconnected, module_state}
             end
 
@@ -327,33 +328,33 @@ defmodule Xander.ChainSync do
                    client_state
                  ) do
               {:ok, :next_block, _new_state} ->
-                :ok = client.send(socket, Messages.next_request())
-                :ok = setopts_lib(client).setopts(socket, active: :once)
+                :ok = Transport.send(transport, socket, Messages.next_request())
+                :ok = Transport.setopts(transport, socket, active: :once)
                 :keep_state_and_data
             end
 
           {:error, _} ->
             # If decoding fails, try to read another message
             read_next_message_continue(
-              client,
+              transport,
               socket,
               combined_payload,
               client_module,
               client_state
             )
 
-            :ok = setopts_lib(client).setopts(socket, active: :once)
+            :ok = Transport.setopts(transport, socket, active: :once)
             :keep_state_and_data
 
           unknown_response ->
             Logger.debug("Unknown message during transition: #{inspect(unknown_response)}")
-            :ok = setopts_lib(client).setopts(socket, active: :once)
+            :ok = Transport.setopts(transport, socket, active: :once)
             :keep_state_and_data
         end
 
       {:error, reason} ->
         Logger.debug("Failed to read payload during transition: #{inspect(reason)}")
-        :ok = setopts_lib(client).setopts(socket, active: :once)
+        :ok = Transport.setopts(transport, socket, active: :once)
         :keep_state_and_data
     end
   end
