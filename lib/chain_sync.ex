@@ -247,6 +247,131 @@ defmodule Xander.ChainSync do
     end
   end
 
+  # Handle socket messages that arrive during the race condition window
+  # between setting active mode and transitioning to new_blocks state
+  def catching_up(
+        :info,
+        {_tcp_or_ssl, socket, data},
+        %__MODULE__{
+          transport: transport,
+          # client: client,
+          socket: socket,
+          client_module: client_module,
+          state: client_state
+        } =
+          module_state
+      ) do
+    Logger.debug(
+      "Received socket message during catching_up state transition - handling gracefully"
+    )
+
+    %{payload: payload, size: payload_length} = Util.plex!(data)
+    remaining_payload_length = payload_length - byte_size(payload)
+
+    # This ensures that if the entire payload has been read sent in data,
+    # we don't try to read anymore.
+    read_remaining_payload = fn
+      current_payload, 0 ->
+        {:ok, current_payload}
+
+      current_payload, recv_payload_length ->
+        case Transport.recv(transport, socket, recv_payload_length, @recv_timeout) do
+          {:ok, additional_payload} ->
+            {:ok, current_payload <> additional_payload}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+    end
+
+    case read_remaining_payload.(payload, remaining_payload_length) do
+      {:ok, combined_payload} ->
+        Logger.debug("read payload during state transition")
+
+        case CSResponse.decode(combined_payload) do
+          {:ok, %AwaitReply{}} ->
+            # We're at the tip, transition to new_blocks and re-enable active mode
+            :ok = Transport.setopts(transport, socket, active: :once)
+            {:next_state, :new_blocks, module_state}
+
+          {:ok, %RollForward{header: header}} ->
+            Logger.debug("decoded block during transition")
+
+            case client_module.handle_block(
+                   %{
+                     block_number: header.block_number,
+                     size: header.block_body_size
+                   },
+                   client_state
+                 ) do
+              {:ok, :next_block, _new_state} ->
+                :ok = Transport.send(transport, socket, Messages.next_request())
+                :ok = Transport.setopts(transport, socket, active: :once)
+                :keep_state_and_data
+
+              {:close, _new_state} ->
+                Logger.debug("Disconnecting from node")
+                :ok = Transport.close(transport, socket)
+                {:next_state, :disconnected, module_state}
+            end
+
+          {:ok, %RollBackward{point: point}} ->
+            Logger.debug(
+              "Calling client_module.handle_rollback during transition with #{point.slot_number}, #{point.hash}"
+            )
+
+            case client_module.handle_rollback(
+                   %{
+                     slot_number: point.slot_number,
+                     block_hash: point.hash
+                   },
+                   client_state
+                 ) do
+              {:ok, :next_block, _new_state} ->
+                :ok = Transport.send(transport, socket, Messages.next_request())
+                :ok = Transport.setopts(transport, socket, active: :once)
+                :keep_state_and_data
+            end
+
+          {:error, _} ->
+            # If decoding fails, try to read another message
+            read_next_message_continue(
+              transport,
+              socket,
+              combined_payload,
+              client_module,
+              client_state
+            )
+
+            :ok = Transport.setopts(transport, socket, active: :once)
+            :keep_state_and_data
+
+          unknown_response ->
+            Logger.debug("Unknown message during transition: #{inspect(unknown_response)}")
+            :ok = Transport.setopts(transport, socket, active: :once)
+            :keep_state_and_data
+        end
+
+      {:error, reason} ->
+        Logger.debug("Failed to read payload during transition: #{inspect(reason)}")
+        :ok = Transport.setopts(transport, socket, active: :once)
+        :keep_state_and_data
+    end
+  end
+
+  # Handle socket close/error events during catching_up state
+  def catching_up(:info, {tcp_or_ssl_closed, _socket}, module_state)
+      when tcp_or_ssl_closed in [:tcp_closed, :ssl_closed] do
+    Logger.warning("Socket closed during catching_up state transition")
+    {:next_state, :disconnected, module_state}
+  end
+
+  def catching_up(:info, {tcp_or_ssl_error, _socket, reason}, module_state)
+      when tcp_or_ssl_error in [:tcp_error, :ssl_error] do
+    Logger.error("Socket error during catching_up state transition: #{inspect(reason)}")
+    {:next_state, :disconnected, module_state}
+  end
+
   # The new_blocks state is when the client has caught up to the tip of the chain
   # and passively receives new blocks from the node after msgAwaitReply responses.
   def new_blocks(
