@@ -197,6 +197,8 @@ defmodule Xander.ChainSync do
         :find_intersection,
         %__MODULE__{transport: transport, socket: socket, sync_from: sync_from} = data
       ) do
+    Logger.debug("finding intersection")
+
     with {:ok, %IntersectionTarget{slot: slot, block_bytes: block_bytes}} <-
            Intersection.find_target(transport, socket, sync_from),
          {:ok, %IntersectFound{}} <-
@@ -221,15 +223,8 @@ defmodule Xander.ChainSync do
 
     emit_initial_next_message = fn transport, socket ->
       with :ok <- Transport.send(transport, socket, Messages.next_request()),
-           {:ok, header_bytes} <- Transport.recv(transport, socket, 8, @recv_timeout),
-           # TODO: use Util.plex!
-           <<_timestamp::big-32, _mode::1, _protocol_id::15, payload_length::big-16>> <-
-             header_bytes,
-           {:ok, payload} <- Transport.recv(transport, socket, payload_length, @recv_timeout) do
+           {:ok, payload} <- recv_message(transport, socket) do
         CSResponse.decode(payload)
-      else
-        {:error, reason} ->
-          {:error, reason}
       end
     end
 
@@ -252,110 +247,15 @@ defmodule Xander.ChainSync do
   def catching_up(
         :info,
         {_tcp_or_ssl, socket, data},
-        %__MODULE__{
-          transport: transport,
-          # client: client,
-          socket: socket,
-          client_module: client_module,
-          state: client_state
-        } =
-          module_state
+        %__MODULE__{socket: socket} = module_state
       ) do
     Logger.debug(
       "Received socket message during catching_up state transition - handling gracefully"
     )
 
-    %{payload: payload, size: payload_length} = Util.plex!(data)
-    remaining_payload_length = payload_length - byte_size(payload)
-
-    # This ensures that if the entire payload has been read sent in data,
-    # we don't try to read anymore.
-    read_remaining_payload = fn
-      current_payload, 0 ->
-        {:ok, current_payload}
-
-      current_payload, recv_payload_length ->
-        case Transport.recv(transport, socket, recv_payload_length, @recv_timeout) do
-          {:ok, additional_payload} ->
-            {:ok, current_payload <> additional_payload}
-
-          {:error, reason} ->
-            {:error, reason}
-        end
-    end
-
-    case read_remaining_payload.(payload, remaining_payload_length) do
-      {:ok, combined_payload} ->
-        Logger.debug("read payload during state transition")
-
-        case CSResponse.decode(combined_payload) do
-          {:ok, %AwaitReply{}} ->
-            # We're at the tip, transition to new_blocks and re-enable active mode
-            :ok = Transport.setopts(transport, socket, active: :once)
-            {:next_state, :new_blocks, module_state}
-
-          {:ok, %RollForward{header: header}} ->
-            Logger.debug("decoded block during transition")
-
-            case client_module.handle_block(
-                   %{
-                     block_number: header.block_number,
-                     size: header.block_body_size
-                   },
-                   client_state
-                 ) do
-              {:ok, :next_block, _new_state} ->
-                :ok = Transport.send(transport, socket, Messages.next_request())
-                :ok = Transport.setopts(transport, socket, active: :once)
-                :keep_state_and_data
-
-              {:close, _new_state} ->
-                Logger.debug("Disconnecting from node")
-                :ok = Transport.close(transport, socket)
-                {:next_state, :disconnected, module_state}
-            end
-
-          {:ok, %RollBackward{point: point}} ->
-            Logger.debug(
-              "Calling client_module.handle_rollback during transition with #{point.slot_number}, #{point.hash}"
-            )
-
-            case client_module.handle_rollback(
-                   %{
-                     slot_number: point.slot_number,
-                     block_hash: point.hash
-                   },
-                   client_state
-                 ) do
-              {:ok, :next_block, _new_state} ->
-                :ok = Transport.send(transport, socket, Messages.next_request())
-                :ok = Transport.setopts(transport, socket, active: :once)
-                :keep_state_and_data
-            end
-
-          {:error, _} ->
-            # If decoding fails, try to read another message
-            read_next_message_continue(
-              transport,
-              socket,
-              combined_payload,
-              client_module,
-              client_state
-            )
-
-            :ok = Transport.setopts(transport, socket, active: :once)
-            :keep_state_and_data
-
-          unknown_response ->
-            Logger.debug("Unknown message during transition: #{inspect(unknown_response)}")
-            :ok = Transport.setopts(transport, socket, active: :once)
-            :keep_state_and_data
-        end
-
-      {:error, reason} ->
-        Logger.debug("Failed to read payload during transition: #{inspect(reason)}")
-        :ok = Transport.setopts(transport, socket, active: :once)
-        :keep_state_and_data
+    case handle_socket_data(data, module_state) do
+      :ok -> {:next_state, :new_blocks, module_state}
+      result -> result
     end
   end
 
@@ -377,47 +277,141 @@ defmodule Xander.ChainSync do
   def new_blocks(
         :info,
         {_tcp_or_ssl, socket, data},
-        %__MODULE__{
-          transport: transport,
-          socket: socket,
-          client_module: client_module,
-          state: state
-        } =
-          module_state
+        %__MODULE__{socket: socket} = module_state
       ) do
     Logger.debug("handling new block")
 
+    case handle_socket_data(data, module_state) do
+      :ok -> :keep_state_and_data
+      result -> result
+    end
+  end
+
+  # Common handler for socket data in both catching_up and new_blocks states
+  defp handle_socket_data(
+         data,
+         %__MODULE__{
+           transport: transport,
+           socket: socket,
+           client_module: client_module,
+           state: client_state
+         } = module_state
+       ) do
     %{payload: payload, size: payload_length} = Util.plex!(data)
     remaining_payload_length = payload_length - byte_size(payload)
 
-    # This ensures that if the entire payload has been read sent in data,
-    # we don't try to read anymore.
-    read_remaining_payload = fn
-      current_payload, 0 ->
-        {:ok, current_payload}
-
-      current_payload, recv_payload_length ->
-        case Transport.recv(transport, socket, recv_payload_length, @recv_timeout) do
-          {:ok, additional_payload} ->
-            {:ok, current_payload <> additional_payload}
-
-          {:error, reason} ->
-            {:error, reason}
-        end
-    end
-
-    case read_remaining_payload.(payload, remaining_payload_length) do
+    case read_remaining_payload(transport, socket, payload, remaining_payload_length) do
       {:ok, combined_payload} ->
-        Logger.debug("read payload on new block")
-
         case CSResponse.decode(combined_payload) do
           {:ok, %AwaitReply{}} ->
             :ok = Transport.setopts(transport, socket, active: :once)
-            :keep_state_and_data
+            :ok
 
           {:ok, %RollForward{header: header}} ->
-            Logger.debug("decoded block perfectly")
+            handle_roll_forward(header, module_state)
 
+          {:ok, %RollBackward{point: point}} ->
+            handle_roll_backward(point, module_state)
+
+          {:error, _} ->
+            read_next_message_continue(
+              transport,
+              socket,
+              combined_payload,
+              client_module,
+              client_state
+            )
+
+            :ok = Transport.setopts(transport, socket, active: :once)
+            :keep_state_and_data
+
+          unknown_response ->
+            Logger.debug("Unknown message: #{inspect(unknown_response)}")
+            :ok = Transport.setopts(transport, socket, active: :once)
+            :keep_state_and_data
+        end
+
+      {:error, reason} ->
+        Logger.debug("Failed to read payload: #{inspect(reason)}")
+        :ok = Transport.setopts(transport, socket, active: :once)
+        :keep_state_and_data
+    end
+  end
+
+  defp handle_roll_forward(
+         header,
+         %__MODULE__{
+           transport: transport,
+           socket: socket,
+           client_module: client_module,
+           state: client_state
+         } = module_state
+       ) do
+    case client_module.handle_block(
+           %{block_number: header.block_number, size: header.block_body_size},
+           client_state
+         ) do
+      {:ok, :next_block, new_state} ->
+        :ok = Transport.send(transport, socket, Messages.next_request())
+        :ok = Transport.setopts(transport, socket, active: :once)
+        {:keep_state, %{module_state | state: new_state}}
+
+      {:close, new_state} ->
+        Logger.debug("Disconnecting from node")
+        :ok = Transport.close(transport, socket)
+        {:next_state, :disconnected, %{module_state | state: new_state}}
+    end
+  end
+
+  defp handle_roll_backward(
+         point,
+         %__MODULE__{
+           transport: transport,
+           socket: socket,
+           client_module: client_module,
+           state: client_state
+         } = module_state
+       ) do
+    Logger.debug("Calling client_module.handle_rollback with #{point.slot_number}, #{point.hash}")
+
+    case client_module.handle_rollback(
+           %{slot_number: point.slot_number, block_hash: point.hash},
+           client_state
+         ) do
+      {:ok, :next_block, new_state} ->
+        :ok = Transport.send(transport, socket, Messages.next_request())
+        :ok = Transport.setopts(transport, socket, active: :once)
+        {:keep_state, %{module_state | state: new_state}}
+
+      {:ok, :stop} ->
+        {:next_state, :disconnected, module_state}
+    end
+  end
+
+  # Helper function to read the next message
+  defp read_until_sync(transport, socket, client_module, state) do
+    Logger.debug("read_until_sync")
+
+    case recv_message(transport, socket) do
+      {:ok, payload} ->
+        case CSResponse.decode(payload) do
+          # When we receive a msgAwaitReply, this means we have reached
+          # the tip and are done with the sync.
+          {:ok, %AwaitReply{}} ->
+            Logger.debug("Awaiting reply")
+            # This is the base case of the recursion and the function no
+            # longer recurses. It sets the socket to active mode so that
+            # data ingestion continues from the "new_blocks" state.
+            # The state transition from the "catching up" state to
+            # "new_blocks" state occurs in the caller of this function.
+
+            # TODO: address race condition that takes place in case the
+            # node replies after socket is set to active but before the
+            # client has transitioned to the new state.
+            :ok = Transport.setopts(transport, socket, active: :once)
+
+          {:ok, %RollForward{header: header}} ->
+            # This is the callback from the client module
             case client_module.handle_block(
                    %{
                      block_number: header.block_number,
@@ -427,54 +421,74 @@ defmodule Xander.ChainSync do
                  ) do
               {:ok, :next_block, new_state} ->
                 :ok = Transport.send(transport, socket, Messages.next_request())
-
-                {:ok, data} = Transport.recv(transport, socket, 8, @recv_timeout)
-                %{payload: payload, size: payload_length} = Util.plex!(data)
-                remaining_payload_length = payload_length - byte_size(payload)
-
-                {:ok, combined_payload} =
-                  read_remaining_payload.(payload, remaining_payload_length)
-
-                case CSResponse.decode(combined_payload) do
-                  {:ok, %AwaitReply{}} ->
-                    # Response should always be [1] msgAwaitReply
-                    :ok = Transport.setopts(transport, socket, active: :once)
-                    {:keep_state, %{module_state | state: new_state}}
-
-                  error ->
-                    Logger.warning("Error decoding next request: #{inspect(error)}")
-                    {:keep_state, %{module_state | state: new_state}}
-                end
+                read_until_sync(transport, socket, client_module, new_state)
 
               {:close, new_state} ->
                 Logger.debug("Disconnecting from node")
                 :ok = Transport.close(transport, socket)
-                {:next_state, :disconnected, %{module_state | state: new_state}}
+                {:next_state, :disconnected, new_state}
             end
 
-          {:ok, %RollBackward{point: point}} ->
-            Logger.debug(
-              "Calling client_module.handle_rollback with #{point.slot_number}, #{point.hash}"
-            )
+          {:error, :incomplete_cbor_data} ->
+            # If decoding fails, try to read another message
+            read_next_message_continue(transport, socket, payload, client_module, state)
+        end
 
-            case client_module.handle_rollback(
+      {:error, reason} ->
+        Logger.debug("Failed to recv message: #{inspect(reason)}")
+        {:error, reason}
+    end
+  end
+
+  # Helper to read remaining payload bytes from socket, or return current payload if nothing left to read
+  defp read_remaining_payload(_transport, _socket, current_payload, 0), do: {:ok, current_payload}
+
+  defp read_remaining_payload(transport, socket, current_payload, recv_payload_length) do
+    case Transport.recv(transport, socket, recv_payload_length, @recv_timeout) do
+      {:ok, additional_payload} ->
+        {:ok, current_payload <> additional_payload}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # Helper to read a complete multiplexed message (header + payload) from socket
+  defp recv_message(transport, socket) do
+    with {:ok, header_bytes} <- Transport.recv(transport, socket, 8, @recv_timeout),
+         %{size: payload_length} <- Util.plex!(header_bytes),
+         {:ok, payload} <- Transport.recv(transport, socket, payload_length, @recv_timeout) do
+      {:ok, payload}
+    end
+  end
+
+  # Helper function to continue reading if the first attempt fails
+  defp read_next_message_continue(transport, socket, first_payload, client_module, state) do
+    Logger.debug("read_next_message_continue")
+
+    case recv_message(transport, socket) do
+      {:ok, second_payload} ->
+        # Combine the payloads and try to decode
+        combined_payload = first_payload <> second_payload
+
+        case CSResponse.decode(combined_payload) do
+          {:ok, %RollForward{header: header}} ->
+            case client_module.handle_block(
                    %{
-                     slot_number: point.slot_number,
-                     block_hash: point.hash
+                     block_number: header.block_number,
+                     size: header.block_body_size
                    },
                    state
                  ) do
               {:ok, :next_block, new_state} ->
                 :ok = Transport.send(transport, socket, Messages.next_request())
-                :ok = Transport.setopts(transport, socket, active: :once)
-                {:keep_state, %{module_state | state: new_state}}
+                read_until_sync(transport, socket, client_module, new_state)
 
               {:ok, :stop} ->
-                {:next_state, :disconnected, module_state}
+                :ok
             end
 
-          {:error, _} ->
-            # If decoding fails, try to read another message
+          {:error, :incomplete_cbor_data} ->
             read_next_message_continue(
               transport,
               socket,
@@ -482,129 +496,10 @@ defmodule Xander.ChainSync do
               client_module,
               state
             )
-
-            :keep_state_and_data
-
-          unknown_response ->
-            Logger.debug("Unknown message: #{inspect(unknown_response)}")
-            :keep_state_and_data
         end
 
       {:error, reason} ->
-        Logger.debug("Failed to read payload on new block: #{inspect(reason)}")
-        :keep_state_and_data
-    end
-  end
-
-  # Helper function to read the next message
-  defp read_until_sync(transport, socket, client_module, state) do
-    # Read the header (8 bytes)
-    case Transport.recv(transport, socket, 8, @recv_timeout) do
-      {:ok, header_bytes} ->
-        # TODO: use Util.plex!
-        <<_timestamp::big-32, _mode::1, _protocol_id::15, payload_length::big-16>> = header_bytes
-
-        case Transport.recv(transport, socket, payload_length, @recv_timeout) do
-          {:ok, payload} ->
-            case CSResponse.decode(payload) do
-              # When we receive a msgAwaitReply, this means we have reached
-              # the tip and are done with the sync.
-              {:ok, %AwaitReply{}} ->
-                Logger.debug("Awaiting reply")
-                # This is the base case of the recursion and the function no
-                # longer recurses. It sets the socket to active mode so that
-                # data ingestion continues from the "new_blocks" state.
-                # The state transition from the "catching up" state to
-                # "new_blocks" state occurs in the caller of this function.
-
-                # TODO: address race condition that takes place in case the
-                # node replies after socket is set to active but before the
-                # client has transitioned to the new state.
-                :ok = Transport.setopts(transport, socket, active: :once)
-
-              {:ok, %RollForward{header: header}} ->
-                # This is the callback from the client module
-                case client_module.handle_block(
-                       %{
-                         block_number: header.block_number,
-                         size: header.block_body_size
-                       },
-                       state
-                     ) do
-                  {:ok, :next_block, new_state} ->
-                    :ok = Transport.send(transport, socket, Messages.next_request())
-                    read_until_sync(transport, socket, client_module, new_state)
-
-                  {:close, new_state} ->
-                    Logger.debug("Disconnecting from node")
-                    :ok = Transport.close(transport, socket)
-                    {:next_state, :disconnected, new_state}
-                end
-
-              {:error, :incomplete_cbor_data} ->
-                # If decoding fails, try to read another message
-                read_next_message_continue(transport, socket, payload, client_module, state)
-            end
-
-          {:error, reason} ->
-            Logger.debug("Failed to read payload: #{inspect(reason)}")
-            {:error, reason}
-        end
-
-      {:error, reason} ->
-        Logger.debug("Failed to read header: #{inspect(reason)}")
-        {:error, reason}
-    end
-  end
-
-  # Helper function to continue reading if the first attempt fails
-  defp read_next_message_continue(transport, socket, first_payload, client_module, state) do
-    # Read another header
-    case Transport.recv(transport, socket, 8, @recv_timeout) do
-      {:ok, header_bytes} ->
-        # TODO: use Util.plex!
-        <<_timestamp::big-32, _mode::1, _protocol_id::15, payload_length::big-16>> = header_bytes
-
-        # Read another payload
-        case Transport.recv(transport, socket, payload_length, @recv_timeout) do
-          {:ok, second_payload} ->
-            # Combine the payloads and try to decode
-            combined_payload = first_payload <> second_payload
-
-            case CSResponse.decode(combined_payload) do
-              {:ok, %RollForward{header: header}} ->
-                case client_module.handle_block(
-                       %{
-                         block_number: header.block_number,
-                         size: header.block_body_size
-                       },
-                       state
-                     ) do
-                  {:ok, :next_block, new_state} ->
-                    :ok = Transport.send(transport, socket, Messages.next_request())
-                    read_until_sync(transport, socket, client_module, new_state)
-
-                  {:ok, :stop} ->
-                    :ok
-                end
-
-              {:error, :incomplete_cbor_data} ->
-                read_next_message_continue(
-                  transport,
-                  socket,
-                  combined_payload,
-                  client_module,
-                  state
-                )
-            end
-
-          {:error, reason} ->
-            Logger.debug("Failed to read second payload: #{inspect(reason)}")
-            {:error, reason}
-        end
-
-      {:error, reason} ->
-        Logger.debug("Failed to read second header: #{inspect(reason)}")
+        Logger.debug("Failed to recv message: #{inspect(reason)}")
         {:error, reason}
     end
   end
