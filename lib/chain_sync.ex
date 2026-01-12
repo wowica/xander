@@ -29,10 +29,13 @@ defmodule Xander.ChainSync do
   rewriting it from future invokations of `c:handle_block/2`
 
   Returning `{:ok, :next_block, new_state}` will request the next block once
-  it's made available. This is the only valid return value.
+  it's made available.
+
+  Returning `{:ok, :stop}` will close the connection to the node.
   """
   @callback handle_rollback(point :: map(), state) ::
               {:ok, :next_block, new_state}
+              | {:ok, :stop}
             when state: term(), new_state: term()
 
   alias Xander.ChainSync.Intersection
@@ -59,6 +62,7 @@ defmodule Xander.ChainSync do
     :socket,
     :network,
     queue: :queue.new(),
+    buffer: <<>>,
     state: []
   ]
 
@@ -242,8 +246,8 @@ defmodule Xander.ChainSync do
     end
   end
 
-  # Handle socket messages that arrive during the race condition window
-  # between setting active mode and transitioning to new_blocks state
+  # Handle socket messages that arrive between setting active mode and transitioning to
+  # the new_blocks state
   def catching_up(
         :info,
         {_tcp_or_ssl, socket, data},
@@ -254,8 +258,17 @@ defmodule Xander.ChainSync do
     )
 
     case handle_socket_data(data, module_state) do
-      :ok -> {:next_state, :new_blocks, module_state}
-      result -> result
+      :ok ->
+        {:next_state, :new_blocks, module_state}
+
+      {:keep_state, new_module_state} ->
+        {:next_state, :new_blocks, new_module_state}
+
+      :keep_state_and_data ->
+        {:next_state, :new_blocks, module_state}
+
+      result ->
+        result
     end
   end
 
@@ -287,26 +300,96 @@ defmodule Xander.ChainSync do
     end
   end
 
-  # Common handler for socket data in both catching_up and new_blocks states
+  # Common handler for socket data in both catching_up and new_blocks states.
+  # Uses async buffering to avoid blocking reads on an active socket.
   defp handle_socket_data(
          data,
-         %__MODULE__{transport: transport, socket: socket} = module_state
+         %__MODULE__{buffer: buffer} = module_state
        ) do
-    with {:ok, %{payload: payload, size: payload_length}} <- Util.plex(data),
-         remaining_payload_length = payload_length - byte_size(payload),
-         {:ok, combined_payload} <-
-           read_remaining_payload(transport, socket, payload, remaining_payload_length),
-         {:ok, decoded} <- CSResponse.decode(combined_payload) do
-      handle_decoded_response(decoded, combined_payload, module_state)
-    else
-      {:error, reason} ->
-        Logger.error("Failed to process socket data: #{inspect(reason)}")
+    # Append incoming data to the buffer
+    new_buffer = buffer <> data
+    process_buffer(new_buffer, module_state)
+  end
+
+  # Process buffered data, extracting and handling complete frames.
+  # Multiplexed frames have an 8-byte header followed by payload.
+  defp process_buffer(buffer, %__MODULE__{transport: transport, socket: socket} = module_state) do
+    case extract_frame(buffer) do
+      {:ok, payload, remaining_buffer} ->
+        # We have a complete frame, try to decode it
+        case CSResponse.decode(payload) do
+          {:ok, decoded} ->
+            # Process this frame, then continue with remaining buffer
+            case handle_decoded_response(decoded, module_state) do
+              {:keep_state, new_module_state} ->
+                # Update buffer and continue processing any remaining data
+                new_module_state = %{new_module_state | buffer: remaining_buffer}
+
+                if byte_size(remaining_buffer) > 0 do
+                  process_buffer(remaining_buffer, new_module_state)
+                else
+                  {:keep_state, new_module_state}
+                end
+
+              :ok ->
+                # AwaitReply case - update buffer in state
+                if byte_size(remaining_buffer) > 0 do
+                  process_buffer(remaining_buffer, %{module_state | buffer: remaining_buffer})
+                else
+                  :ok
+                end
+
+              other ->
+                other
+            end
+
+          {:error, :incomplete_cbor_data} ->
+            # CBOR data is incomplete but we have a complete frame - this shouldn't happen
+            # Log and wait for more data
+            Logger.warning("Incomplete CBOR in complete frame, buffering")
+            :ok = Transport.setopts(transport, socket, active: :once)
+            {:keep_state, %{module_state | buffer: buffer}}
+
+          {:error, reason} ->
+            Logger.error("Failed to decode frame: #{inspect(reason)}")
+            :ok = Transport.setopts(transport, socket, active: :once)
+            {:keep_state, %{module_state | buffer: <<>>}}
+        end
+
+      :incomplete ->
+        # Not enough data for a complete frame, buffer and wait for more
         :ok = Transport.setopts(transport, socket, active: :once)
-        :keep_state_and_data
+        {:keep_state, %{module_state | buffer: buffer}}
+
+      {:error, reason} ->
+        Logger.error("Failed to extract frame: #{inspect(reason)}")
+        :ok = Transport.setopts(transport, socket, active: :once)
+        {:keep_state, %{module_state | buffer: <<>>}}
     end
   end
 
-  defp handle_decoded_response(%AwaitReply{}, _payload, %__MODULE__{
+  # Extract a complete multiplexed frame from the buffer.
+  # Returns {:ok, payload, remaining_buffer} or :incomplete
+  defp extract_frame(buffer) when byte_size(buffer) < 8, do: :incomplete
+
+  defp extract_frame(buffer) do
+    <<header::binary-size(8), rest::binary>> = buffer
+
+    case Util.plex(header) do
+      {:ok, %{size: payload_length}} ->
+        if byte_size(rest) >= payload_length do
+          <<payload::binary-size(payload_length), remaining::binary>> = rest
+          {:ok, payload, remaining}
+        else
+          :incomplete
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp handle_decoded_response(%AwaitReply{}, %__MODULE__{
          transport: transport,
          socket: socket
        }) do
@@ -314,28 +397,22 @@ defmodule Xander.ChainSync do
     :ok
   end
 
-  defp handle_decoded_response(%RollForward{header: header}, _payload, module_state) do
+  defp handle_decoded_response(%RollForward{header: header}, module_state) do
     handle_roll_forward(header, module_state)
   end
 
-  defp handle_decoded_response(%RollBackward{point: point}, _payload, module_state) do
+  defp handle_decoded_response(%RollBackward{point: point}, module_state) do
     handle_roll_backward(point, module_state)
   end
 
-  defp handle_decoded_response(
-         unknown_response,
-         combined_payload,
-         %__MODULE__{
-           transport: transport,
-           socket: socket,
-           client_module: client_module,
-           state: client_state
-         }
-       ) do
+  defp handle_decoded_response(unknown_response, %__MODULE__{
+         transport: transport,
+         socket: socket
+       }) do
+    # Log unknown response and continue waiting for next message asynchronously
     Logger.debug("Unknown message: #{inspect(unknown_response)}")
-    read_next_message_continue(transport, socket, combined_payload, client_module, client_state)
     :ok = Transport.setopts(transport, socket, active: :once)
-    :keep_state_and_data
+    :ok
   end
 
   defp handle_roll_forward(
@@ -436,19 +513,6 @@ defmodule Xander.ChainSync do
     end
   end
 
-  # Helper to read remaining payload bytes from socket, or return current payload if nothing left to read
-  defp read_remaining_payload(_transport, _socket, current_payload, 0), do: {:ok, current_payload}
-
-  defp read_remaining_payload(transport, socket, current_payload, recv_payload_length) do
-    case Transport.recv(transport, socket, recv_payload_length, @recv_timeout) do
-      {:ok, additional_payload} ->
-        {:ok, current_payload <> additional_payload}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
   # Helper to read a complete multiplexed message (header + payload) from socket
   defp recv_message(transport, socket) do
     with {:ok, header_bytes} <- Transport.recv(transport, socket, 8, @recv_timeout),
@@ -488,6 +552,17 @@ defmodule Xander.ChainSync do
                 :ok
             end
 
+          {:ok, %AwaitReply{}} ->
+            Logger.debug("Awaiting reply during continue")
+            :ok = Transport.setopts(transport, socket, active: :once)
+            :ok
+
+          {:ok, %RollBackward{}} ->
+            Logger.debug("RollBackward during continue")
+            # Handle rollback appropriately
+            :ok = Transport.send(transport, socket, Messages.next_request())
+            read_until_sync(transport, socket, client_module, state)
+
           {:error, :incomplete_cbor_data} ->
             read_next_message_continue(
               transport,
@@ -496,6 +571,10 @@ defmodule Xander.ChainSync do
               client_module,
               state
             )
+
+          {:error, reason} ->
+            Logger.error("Decode failed: #{inspect(reason)}")
+            {:error, reason}
         end
 
       {:error, reason} ->
