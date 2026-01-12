@@ -255,8 +255,16 @@ For a more detailed description of different ways to use this library, read the 
 
 ## Testing
 
-The integration tests are built upon [Yaci Devkit](https://github.com/bloxbean/yaci-devkit) and can be run locally with [nektos/act](https://github.com/nektos/act) like so:
+The integration tests are built upon [Yaci Devkit](https://github.com/bloxbean/yaci-devkit) and can be run locally with [nektos/act](https://github.com/nektos/act).
+
+For x86_64 (Intel/AMD) chips:
 
 ```
 act -j integration_test
+```
+
+For Apple Silicon (M1/M2/M3) chips:
+
+```
+act -j integration_test --container-architecture linux/arm64
 ```
