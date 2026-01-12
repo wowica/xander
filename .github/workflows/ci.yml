@@ -54,17 +54,68 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20.8.0'
+          node-version: "20.8.0"
 
       - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y netcat-openbsd socat
-          
-          # Download and install libssl1.1 manually
-          wget http://archive.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2_amd64.deb
-          sudo dpkg -i libssl1.1_1.1.1f-1ubuntu2_amd64.deb || true
-          sudo apt-get install -f -y
+
+          # Detect architecture
+          ARCH=$(dpkg --print-architecture)
+
+          if [ "$ARCH" = "amd64" ]; then
+            wget http://archive.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2_amd64.deb
+            sudo dpkg -i libssl1.1_1.1.1f-1ubuntu2_amd64.deb || true
+            sudo apt-get install -f -y
+          elif [ "$ARCH" = "arm64" ]; then
+            sudo dpkg --add-architecture amd64
+
+            # Handle traditional sources.list format
+            if [ -f /etc/apt/sources.list ]; then
+              sudo sed -i 's/^deb /deb [arch=arm64] /' /etc/apt/sources.list
+              sudo sed -i 's/^deb-src /deb-src [arch=arm64] /' /etc/apt/sources.list
+            fi
+
+            # Handle DEB822 format (.sources files) used by Ubuntu 24.04+
+            for f in /etc/apt/sources.list.d/*.sources; do
+              if [ -f "$f" ]; then
+                echo "Restricting $f to arm64 architecture"
+                # Add "Architectures: arm64" after the "Types:" line if not already present
+                if ! grep -q "^Architectures:" "$f"; then
+                  sudo sed -i '/^Types:/a Architectures: arm64' "$f"
+                fi
+              fi
+            done
+
+            # Also fix traditional .list files that might reference ports.ubuntu.com
+            for f in /etc/apt/sources.list.d/*.list; do
+              if [ -f "$f" ] && grep -q "ports.ubuntu.com" "$f"; then
+                sudo sed -i 's/^deb /deb [arch=arm64] /' "$f"
+                sudo sed -i 's/^deb-src /deb-src [arch=arm64] /' "$f"
+              fi
+            done
+
+            # Add amd64 package sources from archive.ubuntu.com (has amd64 packages)
+            # Use noble (24.04) to match the container's Ubuntu version
+            echo "deb [arch=amd64] http://archive.ubuntu.com/ubuntu/ noble main restricted universe multiverse" | sudo tee /etc/apt/sources.list.d/amd64.list
+            echo "deb [arch=amd64] http://archive.ubuntu.com/ubuntu/ noble-updates main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/amd64.list
+            
+            sudo apt-get update
+            
+            # Install x86_64 libraries needed to run x86_64 binaries
+            sudo apt-get install -y libc6:amd64 libstdc++6:amd64 zlib1g:amd64 libgmp10:amd64
+            
+            # Download and install libssl1.1 for amd64 (from focal/20.04 since noble doesn't have it)
+            wget http://archive.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2_amd64.deb
+            sudo dpkg --force-architecture -i libssl1.1_1.1.1f-1ubuntu2_amd64.deb || true
+            sudo apt-get install -f -y
+            
+            # Also install libssl1.1 for arm64 (needed by Erlang's crypto library)
+            wget http://ports.ubuntu.com/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2_arm64.deb
+            sudo dpkg -i libssl1.1_1.1.1f-1ubuntu2_arm64.deb || true
+            sudo apt-get install -f -y
+          fi
 
       - name: Cache Cardano CLI and Address
         uses: actions/cache@v3
@@ -75,9 +126,9 @@ jobs:
             /usr/local/bin/cardano-cli
             /usr/local/bin/cardano-node
             /usr/local/bin/cardano-address
-          key: ${{ runner.os }}-cardano-tools-10.2.1
+          key: ${{ runner.os }}-${{ runner.arch }}-cardano-tools-10.2.1
           restore-keys: |
-            ${{ runner.os }}-cardano-tools-
+            ${{ runner.os }}-${{ runner.arch }}-cardano-tools-
 
       - name: Install Cardano Tools
         if: steps.cardano-cache.outputs.cache-hit != 'true'
@@ -85,56 +136,56 @@ jobs:
           # Install dependencies
           sudo apt-get update
           sudo apt-get install -y build-essential pkg-config libffi-dev libgmp-dev libssl-dev libtinfo-dev libsystemd-dev libsodium-dev zlib1g-dev make g++ jq libncursesw6 libtinfo6
-          
+
           # Create cache directory
           mkdir -p ~/.cache/cardano-cli
-          
+
           # Download and install cardano-cli
           wget https://github.com/IntersectMBO/cardano-node/releases/download/10.2.1/cardano-node-10.2.1-linux.tar.gz -O ~/.cache/cardano-cli/cardano-node_10.2.1_linux.tar.gz
-          
+
           # Extract with verbose output to see the structure
           tar -tvf ~/.cache/cardano-cli/cardano-node_10.2.1_linux.tar.gz
-          
+
           # Extract the tar file
           tar -xzf ~/.cache/cardano-cli/cardano-node_10.2.1_linux.tar.gz -C ~/.cache/cardano-cli
-          
+
           # Download and install cardano-address
           wget https://github.com/IntersectMBO/cardano-addresses/releases/download/4.0.0/cardano-address-4.0.0-linux.tar.gz -O ~/.cache/cardano-cli/cardano-addresses.tar.gz
           tar -xzf ~/.cache/cardano-cli/cardano-addresses.tar.gz -C ~/.cache/cardano-cli
-          
+
           # List the contents to verify
           echo "Contents of cache directory:"
           ls -la ~/.cache/cardano-cli
-          
+
           # Find the executables
           CARDANO_CLI_PATH=$(find ~/.cache/cardano-cli -name "cardano-cli" -type f | head -n 1)
           CARDANO_NODE_PATH=$(find ~/.cache/cardano-cli -name "cardano-node" -type f | head -n 1)
           CARDANO_ADDR_PATH=$(find ~/.cache/cardano-cli -name "cardano-address" -type f | head -n 1)
-          
+
           if [ -z "$CARDANO_CLI_PATH" ] || [ -z "$CARDANO_NODE_PATH" ] || [ -z "$CARDANO_ADDR_PATH" ]; then
             echo "Could not find one or more required executables"
             find ~/.cache/cardano-cli -type f
             exit 1
           fi
-          
+
           echo "Found cardano-cli at: $CARDANO_CLI_PATH"
           echo "Found cardano-node at: $CARDANO_NODE_PATH"
           echo "Found cardano-address at: $CARDANO_ADDR_PATH"
-          
+
           # Install to system
           sudo cp "$CARDANO_CLI_PATH" /usr/local/bin/cardano-cli
           sudo cp "$CARDANO_NODE_PATH" /usr/local/bin/cardano-node
           sudo cp "$CARDANO_ADDR_PATH" /usr/local/bin/cardano-address
-          
+
           # Make them executable
           sudo chmod +x /usr/local/bin/cardano-cli
           sudo chmod +x /usr/local/bin/cardano-node
           sudo chmod +x /usr/local/bin/cardano-address
-          
+
           # Verify installation
           cardano-cli --version
           cardano-address --version
-          
+
           # Add to PATH for the current session
           echo "$(dirname "$CARDANO_CLI_PATH")" >> $GITHUB_PATH
 
@@ -163,19 +214,19 @@ jobs:
         run: |
           # Kill any existing Yaci DevKit processes
           pkill -f yaci-devkit || true
-          
+
           # Start Yaci DevKit with verbose output and use pre-downloaded components
           # Defaults to emitting blocks in conway era format, which is the only
           # era currently supported by Xander.
           nohup yaci-devkit up > yaci-devkit.log 2>&1 &
-          
+
           # Save the process ID
           echo $! > yaci-devkit.pid
-          
+
           # Display the log file for debugging
           tail -f yaci-devkit.log &
           TAIL_PID=$!
-          
+
           # Wait for the log to show that Yaci DevKit is starting
           for i in {1..10}; do
             if grep -q "Starting Yaci DevKit" yaci-devkit.log; then
@@ -185,7 +236,7 @@ jobs:
             echo "Waiting for Yaci DevKit to start in logs..."
             sleep 2
           done
-          
+
           # Kill the tail process
           kill $TAIL_PID || true
 
@@ -197,7 +248,7 @@ jobs:
             cat yaci-devkit.log
             exit 1
           fi
-          
+
           # Wait for the Cardano node socket to be available
           for i in {1..60}; do
             # Extract the socket path from the Yaci DevKit logs
@@ -217,7 +268,7 @@ jobs:
             echo "Waiting for Yaci DevKit Cardano node socket to start... (attempt $i/60)"
             sleep 5
           done
-          
+
           echo "Yaci DevKit failed to start. Log contents:"
           cat yaci-devkit.log
           exit 1
