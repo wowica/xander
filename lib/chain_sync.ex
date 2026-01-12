@@ -290,52 +290,52 @@ defmodule Xander.ChainSync do
   # Common handler for socket data in both catching_up and new_blocks states
   defp handle_socket_data(
          data,
+         %__MODULE__{transport: transport, socket: socket} = module_state
+       ) do
+    with {:ok, %{payload: payload, size: payload_length}} <- Util.plex(data),
+         remaining_payload_length = payload_length - byte_size(payload),
+         {:ok, combined_payload} <-
+           read_remaining_payload(transport, socket, payload, remaining_payload_length),
+         {:ok, decoded} <- CSResponse.decode(combined_payload) do
+      handle_decoded_response(decoded, combined_payload, module_state)
+    else
+      {:error, reason} ->
+        Logger.error("Failed to process socket data: #{inspect(reason)}")
+        :ok = Transport.setopts(transport, socket, active: :once)
+        :keep_state_and_data
+    end
+  end
+
+  defp handle_decoded_response(%AwaitReply{}, _payload, %__MODULE__{
+         transport: transport,
+         socket: socket
+       }) do
+    :ok = Transport.setopts(transport, socket, active: :once)
+    :ok
+  end
+
+  defp handle_decoded_response(%RollForward{header: header}, _payload, module_state) do
+    handle_roll_forward(header, module_state)
+  end
+
+  defp handle_decoded_response(%RollBackward{point: point}, _payload, module_state) do
+    handle_roll_backward(point, module_state)
+  end
+
+  defp handle_decoded_response(
+         unknown_response,
+         combined_payload,
          %__MODULE__{
            transport: transport,
            socket: socket,
            client_module: client_module,
            state: client_state
-         } = module_state
+         }
        ) do
-    %{payload: payload, size: payload_length} = Util.plex!(data)
-    remaining_payload_length = payload_length - byte_size(payload)
-
-    case read_remaining_payload(transport, socket, payload, remaining_payload_length) do
-      {:ok, combined_payload} ->
-        case CSResponse.decode(combined_payload) do
-          {:ok, %AwaitReply{}} ->
-            :ok = Transport.setopts(transport, socket, active: :once)
-            :ok
-
-          {:ok, %RollForward{header: header}} ->
-            handle_roll_forward(header, module_state)
-
-          {:ok, %RollBackward{point: point}} ->
-            handle_roll_backward(point, module_state)
-
-          {:error, _} ->
-            read_next_message_continue(
-              transport,
-              socket,
-              combined_payload,
-              client_module,
-              client_state
-            )
-
-            :ok = Transport.setopts(transport, socket, active: :once)
-            :keep_state_and_data
-
-          unknown_response ->
-            Logger.debug("Unknown message: #{inspect(unknown_response)}")
-            :ok = Transport.setopts(transport, socket, active: :once)
-            :keep_state_and_data
-        end
-
-      {:error, reason} ->
-        Logger.debug("Failed to read payload: #{inspect(reason)}")
-        :ok = Transport.setopts(transport, socket, active: :once)
-        :keep_state_and_data
-    end
+    Logger.debug("Unknown message: #{inspect(unknown_response)}")
+    read_next_message_continue(transport, socket, combined_payload, client_module, client_state)
+    :ok = Transport.setopts(transport, socket, active: :once)
+    :keep_state_and_data
   end
 
   defp handle_roll_forward(
@@ -404,10 +404,6 @@ defmodule Xander.ChainSync do
             # data ingestion continues from the "new_blocks" state.
             # The state transition from the "catching up" state to
             # "new_blocks" state occurs in the caller of this function.
-
-            # TODO: address race condition that takes place in case the
-            # node replies after socket is set to active but before the
-            # client has transitioned to the new state.
             :ok = Transport.setopts(transport, socket, active: :once)
 
           {:ok, %RollForward{header: header}} ->
@@ -456,9 +452,13 @@ defmodule Xander.ChainSync do
   # Helper to read a complete multiplexed message (header + payload) from socket
   defp recv_message(transport, socket) do
     with {:ok, header_bytes} <- Transport.recv(transport, socket, 8, @recv_timeout),
-         %{size: payload_length} <- Util.plex!(header_bytes),
+         {:ok, %{size: payload_length}} <- Util.plex(header_bytes),
          {:ok, payload} <- Transport.recv(transport, socket, payload_length, @recv_timeout) do
       {:ok, payload}
+    else
+      {:error, reason} = error ->
+        Logger.error("Failed to read multiplexed message: #{inspect(reason)}")
+        error
     end
   end
 
