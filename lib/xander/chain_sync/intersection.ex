@@ -60,7 +60,7 @@ defmodule Xander.ChainSync.Intersection do
         end
 
       {:error, reason} ->
-        Logger.warning("Find intersection response failed: #{inspect(reason)}")
+        Logger.error("Find intersection response failed: #{inspect(reason)}")
         {:error, reason}
     end
   end
