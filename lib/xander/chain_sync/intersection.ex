@@ -10,23 +10,24 @@ defmodule Xander.ChainSync.Intersection do
 
   @recv_timeout 10_000
 
-  def find_target(transport, socket, sync_from) do
+  # Targets that are known up front don't need the node's tip, so no message
+  # is sent before msgFindIntersect. Sending msgRequestNext first is valid per
+  # the protocol, but some nodes (e.g. Dingo) then ignore the read pointer set
+  # by the following msgFindIntersect and only serve blocks from the tip.
+  def find_target(_transport, _socket, :conway), do: {:ok, Ledger.conway_boundary_target()}
+
+  def find_target(_transport, _socket, :origin), do: {:ok, Ledger.genesis_target()}
+
+  def find_target(_transport, _socket, {slot_number, block_hash}),
+    do: {:ok, Ledger.custom_point_target(slot_number, block_hash)}
+
+  # Any other value syncs from the node's current tip, which is read from the
+  # msgRollBackward reply to an initial msgRequestNext.
+  def find_target(transport, socket, _sync_from) do
     with :ok <- Transport.send(transport, socket, Messages.next_request()),
          {:ok, intersection_response} <- Transport.recv(transport, socket, 0, @recv_timeout),
          {:ok, %RollBackward{tip: tip}} <- Response.parse_response(intersection_response) do
-      case sync_from do
-        :conway ->
-          {:ok, Ledger.conway_boundary_target()}
-
-        :origin ->
-          {:ok, Ledger.genesis_target()}
-
-        {slot_number, block_hash} ->
-          {:ok, Ledger.custom_point_target(slot_number, block_hash)}
-
-        _ ->
-          {:ok, Ledger.custom_point_target(tip.slot_number, tip.hash)}
-      end
+      {:ok, Ledger.custom_point_target(tip.slot_number, tip.hash)}
     else
       {:error, reason} ->
         Logger.error("Error finding initial intersection: #{inspect(reason)}")

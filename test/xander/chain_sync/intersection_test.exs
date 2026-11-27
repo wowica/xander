@@ -19,6 +19,15 @@ defmodule Xander.ChainSync.IntersectionTest do
     end
   end
 
+  defmodule RecordingClient do
+    def send(_socket, data) do
+      Kernel.send(self(), {:sent, data})
+      :ok
+    end
+
+    def recv(_socket, _length, _timeout), do: {:error, :unexpected_recv}
+  end
+
   defp test_transport do
     %Transport{
       type: :socket,
@@ -96,12 +105,8 @@ defmodule Xander.ChainSync.IntersectionTest do
 
   describe "find_target/3" do
     test "returns conway boundary target when sync_from is :conway" do
-      tip_slot = 150_000_000
-      tip_block_bytes = :crypto.strong_rand_bytes(32)
-      response = build_roll_backward_response(tip_slot, tip_block_bytes)
-
       transport = test_transport()
-      socket = {:test_response, response}
+      socket = {:test_error, :unexpected_recv}
 
       assert {:ok, target} = Intersection.find_target(transport, socket, :conway)
       assert target == Ledger.conway_boundary_target()
@@ -109,12 +114,8 @@ defmodule Xander.ChainSync.IntersectionTest do
     end
 
     test "returns genesis target when sync_from is :origin" do
-      tip_slot = 150_000_000
-      tip_block_bytes = :crypto.strong_rand_bytes(32)
-      response = build_roll_backward_response(tip_slot, tip_block_bytes)
-
       transport = test_transport()
-      socket = {:test_response, response}
+      socket = {:test_error, :unexpected_recv}
 
       assert {:ok, target} = Intersection.find_target(transport, socket, :origin)
       assert target == Ledger.genesis_target()
@@ -122,21 +123,28 @@ defmodule Xander.ChainSync.IntersectionTest do
     end
 
     test "returns custom point target when sync_from is a tuple {slot, hash}" do
-      tip_slot = 150_000_000
-      tip_block_bytes = :crypto.strong_rand_bytes(32)
-      response = build_roll_backward_response(tip_slot, tip_block_bytes)
-
       custom_slot = 100_000
       custom_hash = "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
 
       transport = test_transport()
-      socket = {:test_response, response}
+      socket = {:test_error, :unexpected_recv}
 
       assert {:ok, target} =
                Intersection.find_target(transport, socket, {custom_slot, custom_hash})
 
       assert target == Ledger.custom_point_target(custom_slot, custom_hash)
       assert %IntersectionTarget{slot: ^custom_slot, block_hash: ^custom_hash} = target
+    end
+
+    test "sends no message to the node when the target is known up front" do
+      transport = %Transport{test_transport() | client: RecordingClient}
+
+      for sync_from <- [:conway, :origin, {100_000, String.duplicate("ab", 32)}] do
+        assert {:ok, %IntersectionTarget{}} =
+                 Intersection.find_target(transport, make_ref(), sync_from)
+      end
+
+      refute_received {:sent, _}
     end
 
     test "returns target from tip when sync_from is any other value" do
@@ -175,7 +183,7 @@ defmodule Xander.ChainSync.IntersectionTest do
       log =
         capture_log(fn ->
           assert {:error, :error_finding_initial_intersection} =
-                   Intersection.find_target(transport, socket, :conway)
+                   Intersection.find_target(transport, socket, nil)
         end)
 
       assert log =~ "Error finding initial intersection"
@@ -191,7 +199,7 @@ defmodule Xander.ChainSync.IntersectionTest do
       log =
         capture_log(fn ->
           assert {:error, :error_finding_initial_intersection} =
-                   Intersection.find_target(transport, socket, :conway)
+                   Intersection.find_target(transport, socket, nil)
         end)
 
       assert log =~ "Error finding initial intersection"
