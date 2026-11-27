@@ -347,6 +347,58 @@ defmodule Xander.ChainSyncTest do
     end
   end
 
+  # Serves queued binaries in order, honoring the requested length, so that
+  # header (8 bytes) and payload reads behave like a real socket.
+  defmodule QueuedRecvClient do
+    def send(_socket, _data), do: :ok
+
+    def recv(_socket, length, _timeout) do
+      case Process.get(:queued_recv, <<>>) do
+        <<>> ->
+          {:error, :no_more_responses}
+
+        buffer when length == 0 ->
+          Process.put(:queued_recv, <<>>)
+          {:ok, buffer}
+
+        <<chunk::binary-size(length), rest::binary>> ->
+          Process.put(:queued_recv, rest)
+          {:ok, chunk}
+      end
+    end
+  end
+
+  defmodule RecordingSetoptsModule do
+    def setopts(_socket, opts) do
+      send(self(), {:setopts, opts})
+      :ok
+    end
+  end
+
+  describe "catching_up/3 :start_chain_sync" do
+    test "transitions to new_blocks in active mode when node replies with msgAwaitReply" do
+      Process.put(:queued_recv, build_await_reply_response())
+
+      transport = %Transport{
+        test_transport()
+        | client: QueuedRecvClient,
+          setopts_module: RecordingSetoptsModule
+      }
+
+      data = %ChainSync{
+        client_module: TestHandler,
+        transport: transport,
+        socket: make_ref(),
+        state: [test_pid: self()]
+      }
+
+      assert {:next_state, :new_blocks, ^data} =
+               ChainSync.catching_up(:internal, :start_chain_sync, data)
+
+      assert_received {:setopts, [active: :once]}
+    end
+  end
+
   describe "catching_up/3 socket message handling" do
     @tag capture_log: true
     test "handles tcp_closed during state transition" do

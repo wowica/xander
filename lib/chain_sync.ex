@@ -241,6 +241,10 @@ defmodule Xander.ChainSync do
         read_until_sync(transport, socket, client_module, data)
         {:next_state, :new_blocks, data}
 
+      {:ok, %AwaitReply{}} ->
+        :ok = Transport.setopts(transport, socket, active: :once)
+        {:next_state, :new_blocks, data}
+
       {:error, reason} ->
         Logger.warning("Error decoding payload: #{inspect(reason)}")
         :keep_state_and_data

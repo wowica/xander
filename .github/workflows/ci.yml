@@ -8,7 +8,7 @@ on:
 
 jobs:
   unit_test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     strategy:
       matrix:
@@ -40,7 +40,7 @@ jobs:
         run: mix test --warnings-as-errors
 
   integration_test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     strategy:
       matrix:
