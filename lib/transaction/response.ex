@@ -3,8 +3,6 @@ defmodule Xander.Transaction.Response do
   Parses the response from a transaction. Accepts CBOR encoded responses.
   """
 
-  require Logger
-
   @type error_reason ::
           :cannot_decode_non_binary_values
           | :cbor_function_clause_error

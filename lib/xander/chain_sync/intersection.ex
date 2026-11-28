@@ -14,16 +14,22 @@ defmodule Xander.ChainSync.Intersection do
   # is sent before msgFindIntersect. Sending msgRequestNext first is valid per
   # the protocol, but some nodes (e.g. Dingo) then ignore the read pointer set
   # by the following msgFindIntersect and only serve blocks from the tip.
-  def find_target(_transport, _socket, :conway), do: {:ok, Ledger.conway_boundary_target()}
+  def find_target(transport, socket, sync_from, network \\ nil)
 
-  def find_target(_transport, _socket, :origin), do: {:ok, Ledger.genesis_target()}
+  def find_target(_transport, _socket, :conway, _network),
+    do: {:ok, Ledger.conway_boundary_target()}
 
-  def find_target(_transport, _socket, {slot_number, block_hash}),
+  def find_target(_transport, _socket, :babbage, network),
+    do: Ledger.babbage_boundary_target(network)
+
+  def find_target(_transport, _socket, :origin, _network), do: {:ok, Ledger.genesis_target()}
+
+  def find_target(_transport, _socket, {slot_number, block_hash}, _network),
     do: {:ok, Ledger.custom_point_target(slot_number, block_hash)}
 
   # Any other value syncs from the node's current tip, which is read from the
   # msgRollBackward reply to an initial msgRequestNext.
-  def find_target(transport, socket, _sync_from) do
+  def find_target(transport, socket, _sync_from, _network) do
     with :ok <- Transport.send(transport, socket, Messages.next_request()),
          {:ok, intersection_response} <- Transport.recv(transport, socket, 0, @recv_timeout),
          {:ok, %RollBackward{tip: tip}} <- Response.parse_response(intersection_response) do

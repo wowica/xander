@@ -29,6 +29,27 @@ defmodule Xander.ChainSync.LedgerTest do
     end
   end
 
+  describe "babbage_boundary_target/1" do
+    test "returns the last alonzo block on preview as intersection target" do
+      assert {:ok, %IntersectionTarget{} = target} = Ledger.babbage_boundary_target(:preview)
+      assert target.slot == 259_180
+
+      assert target.block_hash ==
+               "0ad91d3bbe350b1cfa05b13dba5263c47c5eca4f97b3a3105eba96416785a487"
+
+      assert target.block_bytes == Base.decode16!(target.block_hash, case: :lower)
+    end
+
+    test "returns error for networks without a known boundary" do
+      assert {:error, {:unsupported_network, :sanchonet}} =
+               Ledger.babbage_boundary_target(:sanchonet)
+    end
+
+    test "lists supported networks" do
+      assert :preview in Ledger.babbage_supported_networks()
+    end
+  end
+
   describe "custom_point_target/2" do
     test "creates intersection target with given slot and hash" do
       slot = 100_000

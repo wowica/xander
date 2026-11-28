@@ -15,6 +15,10 @@ defmodule FollowDaChain do
       ## :conway era is only supported on mainnet
       sync_from: :conway
 
+      ## Start of the Babbage era (currently preview only).
+      ## Requires CARDANO_NETWORK=preview.
+      # sync_from: :babbage
+
       ## Preview testnet conway era boundary
       # sync_from: {55814394, "bdd4baa2c81d0500a695f836332193ea06c2ce364e585057142220fc0782144c"}
 
@@ -27,8 +31,8 @@ defmodule FollowDaChain do
   end
 
   @impl true
-  def handle_block(%{block_number: block_number, size: size}, state) do
-    IO.puts("block_number: #{block_number}, size: #{size}")
+  def handle_block(%{era: era, block_number: block_number, size: size}, state) do
+    IO.puts("era: #{era}, block_number: #{block_number}, size: #{size}")
     {:ok, :next_block, state}
   end
 
@@ -50,7 +54,8 @@ defmodule CardanoApplication do
 
   defp opts do
     socket_path = System.get_env("CARDANO_NODE_SOCKET_PATH", "/tmp/cardano-node.socket")
-    Xander.Config.default_config!(socket_path)
+    network = System.get_env("CARDANO_NETWORK", "mainnet") |> String.to_atom()
+    Xander.Config.default_config!(socket_path, network)
   end
 end
 

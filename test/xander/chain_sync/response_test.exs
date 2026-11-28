@@ -29,7 +29,7 @@ defmodule Xander.ChainSync.ResponseTest do
       block_body_size = 6789
 
       header_content = [
-        0,
+        7,
         [[[block_number, 1, 2, 3, 4, 5, block_body_size, 7, 8], []], []]
       ]
 
@@ -200,7 +200,7 @@ defmodule Xander.ChainSync.ResponseTest do
       block_body_size = 88888
 
       header_content = [
-        0,
+        7,
         [[[block_number, 1, 2, 3, 4, 5, block_body_size, 7, 8], []], []]
       ]
 
@@ -251,6 +251,48 @@ defmodule Xander.ChainSync.ResponseTest do
     end
   end
 
+  describe "era-aware header parsing" do
+    defp roll_forward_for_era(era_index, block_number, block_body_size) do
+      header_bytes =
+        CBOR.encode([
+          era_index,
+          [[[block_number, 1, 2, 3, 4, 5, block_body_size, 7, 8, 9], []], [], [], %{}, []]
+        ])
+
+      header = %CBOR.Tag{
+        tag: @encoded_cbor_data_tag,
+        value: %CBOR.Tag{tag: :bytes, value: header_bytes}
+      }
+
+      tip = [[1, %CBOR.Tag{tag: :bytes, value: :crypto.strong_rand_bytes(32)}], 1]
+      CBOR.encode([2, header, tip])
+    end
+
+    test "decodes a babbage era block (era index 6)" do
+      assert {:ok, %RollForward{header: header}} =
+               Response.decode(roll_forward_for_era(6, 13_012, 4))
+
+      assert %Header{era: :babbage, block_number: 13_012, block_body_size: 4} = header
+    end
+
+    test "decodes a conway era block (era index 7)" do
+      assert {:ok, %RollForward{header: header}} =
+               Response.decode(roll_forward_for_era(7, 2_000_000, 1234))
+
+      assert %Header{era: :conway, block_number: 2_000_000, block_body_size: 1234} = header
+    end
+
+    test "rejects blocks from pre-babbage eras" do
+      log =
+        capture_log(fn ->
+          # Alonzo
+          assert {:error, :unsupported_era} = Response.decode(roll_forward_for_era(5, 1, 1))
+        end)
+
+      assert log =~ "Could not parse block"
+    end
+  end
+
   describe "parse_header error handling" do
     test "returns error and logs message for unsupported era header format" do
       # Create a header that doesn't match the conway era pattern
@@ -281,7 +323,7 @@ defmodule Xander.ChainSync.ResponseTest do
         end)
 
       assert log =~ "Could not parse block"
-      assert log =~ "Only conway era formats are currently supported"
+      assert log =~ "Only babbage and conway era formats are currently supported"
     end
 
     test "returns error for invalid CBOR in header bytes" do
