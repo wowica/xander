@@ -377,7 +377,7 @@ defmodule Xander.ChainSyncTest do
           Process.put(:queued_recv, <<>>)
           {:ok, buffer}
 
-        <<chunk::binary-size(length), rest::binary>> ->
+        <<chunk::binary-size(^length), rest::binary>> ->
           Process.put(:queued_recv, rest)
           {:ok, chunk}
       end
