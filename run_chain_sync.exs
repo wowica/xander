@@ -54,7 +54,7 @@ defmodule CardanoApplication do
 
   defp opts do
     socket_path = System.get_env("CARDANO_NODE_SOCKET_PATH", "/tmp/cardano-node.socket")
-    network = System.get_env("CARDANO_NETWORK", "mainnet") |> String.to_existing_atom()
+    network = System.get_env("CARDANO_NETWORK", "mainnet") |> String.to_atom()
     Xander.Config.default_config!(socket_path, network)
   end
 end
