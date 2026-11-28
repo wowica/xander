@@ -112,7 +112,7 @@ defmodule Xander.ChainSyncTest do
 
   defp build_roll_forward_response(block_number, block_body_size, tip_slot \\ 150_000_000) do
     header_content = [
-      0,
+      7,
       [[[block_number, 1, 2, 3, 4, 5, block_body_size, 7, 8], []], []]
     ]
 
@@ -325,6 +325,22 @@ defmodule Xander.ChainSyncTest do
                "Syncing from origin is only supported on the yaci_devkit network"
     end
 
+    test "ignores start when sync_from is :babbage on an unsupported network" do
+      log =
+        capture_log(fn ->
+          assert :ignore ==
+                   ChainSync.start_link(TestHandler,
+                     network: :sanchonet,
+                     path: "/tmp/test.socket",
+                     port: 0,
+                     type: :socket,
+                     sync_from: :babbage
+                   )
+        end)
+
+      assert log =~ "Syncing from babbage is only supported"
+    end
+
     @tag capture_log: true
     test "allows sync_from :origin when network is :yaci_devkit" do
       # This will fail to actually connect but won't be ignored
@@ -395,6 +411,34 @@ defmodule Xander.ChainSyncTest do
       assert {:next_state, :new_blocks, ^data} =
                ChainSync.catching_up(:internal, :start_chain_sync, data)
 
+      assert_received {:setopts, [active: :once]}
+    end
+
+    test "passes the client state to handle_block while catching up" do
+      Process.put(
+        :queued_recv,
+        build_roll_backward_origin_response() <>
+          build_roll_forward_response(13_012, 4) <>
+          build_await_reply_response()
+      )
+
+      transport = %Transport{
+        test_transport()
+        | client: QueuedRecvClient,
+          setopts_module: RecordingSetoptsModule
+      }
+
+      data = %ChainSync{
+        client_module: TestHandler,
+        transport: transport,
+        socket: make_ref(),
+        state: [test_pid: self()]
+      }
+
+      assert {:next_state, :new_blocks, ^data} =
+               ChainSync.catching_up(:internal, :start_chain_sync, data)
+
+      assert_received {:block_received, %{era: :conway, block_number: 13_012, size: 4}}
       assert_received {:setopts, [active: :once]}
     end
   end

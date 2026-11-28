@@ -9,6 +9,9 @@ defmodule Xander.ChainSync.Response do
   # See https://www.rfc-editor.org/rfc/rfc8949.html#section-3.4
   @encoded_cbor_data_tag 24
 
+  # Era indexes used by the hard fork combinator when wrapping blocks.
+  @supported_eras %{6 => :babbage, 7 => :conway}
+
   def parse_response(response) do
     case Util.plex(response) do
       {:ok, %{payload: response_payload}} ->
@@ -24,7 +27,7 @@ defmodule Xander.ChainSync.Response do
   end
 
   defmodule Header do
-    defstruct [:block_body_size, :block_number, :bytes]
+    defstruct [:era, :block_body_size, :block_number, :bytes]
   end
 
   defmodule IntersectFound do
@@ -102,23 +105,28 @@ defmodule Xander.ChainSync.Response do
     } = header
 
     case CBOR.decode(header_bytes) do
-      # This block header is conway era ONLY.
-      # Once new eras are supported (Babbage, Shelley, Byron), then
-      # additional patterns for parsing the header will need to be added.
-      {:ok,
-       [
-         _idk_what_this_is,
-         [[[block_number, _, _, _, _, _, block_body_size | _] | _] | _] | _signature
-       ], _rest} ->
+      # Blocks are wrapped by the hard fork combinator as [era_index, block],
+      # where block = [header, tx_bodies, tx_witnesses, aux_data, invalid_txs]
+      # and header = [header_body, body_signature].
+      # Babbage and Conway share the same 10-field header body:
+      # [block_number, slot, prev_hash, issuer_vkey, vrf_vkey, vrf_result,
+      #  block_body_size, block_body_hash, operational_cert, protocol_version]
+      {:ok, [era_index, [[[block_number, _, _, _, _, _, block_body_size | _] | _] | _] | _],
+       _rest}
+      when is_map_key(@supported_eras, era_index) ->
         {:ok,
          %Header{
+           era: Map.fetch!(@supported_eras, era_index),
            block_number: block_number,
            block_body_size: block_body_size,
            bytes: header_bytes
          }}
 
       {:ok, _unsupported_era, _rest} ->
-        Logger.error("Could not parse block. Only conway era formats are currently supported.")
+        Logger.error(
+          "Could not parse block. Only babbage and conway era formats are currently supported."
+        )
+
         {:error, :unsupported_era}
 
       {:error, reason} ->

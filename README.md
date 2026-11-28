@@ -19,7 +19,7 @@ Elixir client for Cardano's Ouroboros networking protocol. This library can be u
   - get_current_era
   - get_current_block_height
   - get_current_tip
-- [x] Chain-Sync (support for Conway era only)
+- [x] Chain-Sync (support for Babbage and Conway eras)
 
 ## Quickstart
 
@@ -222,7 +222,13 @@ For a more detailed description of different ways to use this library, read the 
 
   Using default settings, this will start syncing from the start of the Conway era. For each block, the block number (height) and block size (in bytes) will be displayed.
 
-  If you wish to connect with one of the testnets, see comments on the `FollowDaChain.start_link/1` function for more information on exact points in the chain to start syncing from.
+  If you wish to connect with one of the testnets, set `CARDANO_NETWORK` (e.g. `CARDANO_NETWORK=preview`) and see comments on the `FollowDaChain.start_link/1` function for more information on exact points in the chain to start syncing from.
+
+  To sync from the start of the Babbage era on the preview network, set `sync_from: :babbage` in `FollowDaChain.start_link/1` and run:
+
+  ```
+  CARDANO_NETWORK=preview CARDANO_NODE_SOCKET_PATH=/path/to/preview-node.socket elixir run_chain_sync.exs
+  ```
 
   ## Using Docker
 

@@ -8,6 +8,11 @@ defmodule Xander.ChainSync do
   Invoked when a new block is emitted. This callback is required.
 
   Receives block information as argument and the current state of the handler.
+  The block is a map with the following keys:
+
+    * `:era` - the era of the block, either `:babbage` or `:conway`
+    * `:block_number` - the block number (height)
+    * `:size` - the size of the block body in bytes
 
   Returning `{:ok, :next_block, new_state}` will request the next block once
   it's made available.
@@ -36,6 +41,7 @@ defmodule Xander.ChainSync do
             when state: term(), new_state: term()
 
   alias Xander.ChainSync.Intersection
+  alias Xander.ChainSync.Ledger
   alias Xander.ChainSync.Ledger.IntersectionTarget
   alias Xander.ChainSync.Response, as: CSResponse
   alias Xander.ChainSync.Response.AwaitReply
@@ -88,14 +94,23 @@ defmodule Xander.ChainSync do
       state: state
     }
 
-    if sync_from && sync_from == :origin && network != :yaci_devkit do
-      Logger.error(
-        "Syncing from origin is only supported on the yaci_devkit network when create-node is used with the --era conway flag."
-      )
+    cond do
+      sync_from == :origin && network != :yaci_devkit ->
+        Logger.error(
+          "Syncing from origin is only supported on the yaci_devkit network when create-node is used with the --era conway flag."
+        )
 
-      :ignore
-    else
-      :gen_statem.start_link({:local, __MODULE__}, __MODULE__, data, [])
+        :ignore
+
+      sync_from == :babbage && network not in Ledger.babbage_supported_networks() ->
+        Logger.error(
+          "Syncing from babbage is only supported on the following networks: #{inspect(Ledger.babbage_supported_networks())}"
+        )
+
+        :ignore
+
+      true ->
+        :gen_statem.start_link({:local, __MODULE__}, __MODULE__, data, [])
     end
   end
 
@@ -195,10 +210,15 @@ defmodule Xander.ChainSync do
   def catching_up(
         :internal,
         :find_intersection,
-        %__MODULE__{transport: transport, socket: socket, sync_from: sync_from} = data
+        %__MODULE__{
+          transport: transport,
+          socket: socket,
+          sync_from: sync_from,
+          network: network
+        } = data
       ) do
     with {:ok, %IntersectionTarget{slot: slot, block_bytes: block_bytes}} <-
-           Intersection.find_target(transport, socket, sync_from),
+           Intersection.find_target(transport, socket, sync_from, network),
          {:ok, %IntersectFound{}} <-
            Intersection.find_intersection(transport, socket, slot, block_bytes) do
       # Start the actual chainsync messages
@@ -238,8 +258,16 @@ defmodule Xander.ChainSync do
         :ok = Transport.send(transport, socket, Messages.next_request())
 
         # Read the next message
-        read_until_sync(transport, socket, client_module, data)
-        {:next_state, :new_blocks, data}
+        case read_until_sync(transport, socket, client_module, data.state) do
+          {:ok, client_state} ->
+            {:next_state, :new_blocks, %{data | state: client_state}}
+
+          {:next_state, :disconnected, client_state} ->
+            {:next_state, :disconnected, %{data | state: client_state}}
+
+          _ ->
+            {:next_state, :new_blocks, data}
+        end
 
       {:ok, %AwaitReply{}} ->
         :ok = Transport.setopts(transport, socket, active: :once)
@@ -303,6 +331,7 @@ defmodule Xander.ChainSync do
 
             case client_module.handle_block(
                    %{
+                     era: header.era,
                      block_number: header.block_number,
                      size: header.block_body_size
                    },
@@ -424,6 +453,7 @@ defmodule Xander.ChainSync do
 
             case client_module.handle_block(
                    %{
+                     era: header.era,
                      block_number: header.block_number,
                      size: header.block_body_size
                    },
@@ -525,11 +555,13 @@ defmodule Xander.ChainSync do
                 # node replies after socket is set to active but before the
                 # client has transitioned to the new state.
                 :ok = Transport.setopts(transport, socket, active: :once)
+                {:ok, state}
 
               {:ok, %RollForward{header: header}} ->
                 # This is the callback from the client module
                 case client_module.handle_block(
                        %{
+                         era: header.era,
                          block_number: header.block_number,
                          size: header.block_body_size
                        },
@@ -579,6 +611,7 @@ defmodule Xander.ChainSync do
               {:ok, %RollForward{header: header}} ->
                 case client_module.handle_block(
                        %{
+                         era: header.era,
                          block_number: header.block_number,
                          size: header.block_body_size
                        },

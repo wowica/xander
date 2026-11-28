@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `Xander.ChainSync` support for Babbage era blocks. Use `sync_from: :babbage`
+to sync from the start of the Babbage era (currently supported on the preview
+network). Blocks passed to `handle_block/2` now include an `:era` key.
 - `Xander.Query` support for retrying connection to node when it is not available.
 - `Xander.Transport` module to abstract transport layer details for connecting
 to Cardano nodes, providing a unified interface for both Unix socket
@@ -25,6 +28,9 @@ transport-specific logic.
 - Refactored `Xander.ChainSync` to use the new `Xander.Transport` module.
 
 ### Fixed
+
+- Fix `Xander.ChainSync` passing its internal struct instead of the client
+state to `handle_block/2` while catching up to the tip.
 
 - Fix reading multiplexer messages on `Xander.Util.plex/1`. This fix properly
 accounts for the Mode bit in the multiplexer which fixes the reading of

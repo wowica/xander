@@ -113,6 +113,22 @@ defmodule Xander.ChainSync.IntersectionTest do
       assert %IntersectionTarget{slot: 133_660_799} = target
     end
 
+    test "returns babbage boundary target for the given network when sync_from is :babbage" do
+      transport = test_transport()
+      socket = {:test_error, :unexpected_recv}
+
+      assert {:ok, target} = Intersection.find_target(transport, socket, :babbage, :preview)
+      assert {:ok, target} == Ledger.babbage_boundary_target(:preview)
+    end
+
+    test "returns error when sync_from is :babbage on an unsupported network" do
+      transport = test_transport()
+      socket = {:test_error, :unexpected_recv}
+
+      assert {:error, {:unsupported_network, :sanchonet}} =
+               Intersection.find_target(transport, socket, :babbage, :sanchonet)
+    end
+
     test "returns genesis target when sync_from is :origin" do
       transport = test_transport()
       socket = {:test_error, :unexpected_recv}
@@ -139,9 +155,9 @@ defmodule Xander.ChainSync.IntersectionTest do
     test "sends no message to the node when the target is known up front" do
       transport = %Transport{test_transport() | client: RecordingClient}
 
-      for sync_from <- [:conway, :origin, {100_000, String.duplicate("ab", 32)}] do
+      for sync_from <- [:conway, :babbage, :origin, {100_000, String.duplicate("ab", 32)}] do
         assert {:ok, %IntersectionTarget{}} =
-                 Intersection.find_target(transport, make_ref(), sync_from)
+                 Intersection.find_target(transport, make_ref(), sync_from, :preview)
       end
 
       refute_received {:sent, _}
